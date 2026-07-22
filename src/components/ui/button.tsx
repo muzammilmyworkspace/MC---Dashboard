@@ -11,16 +11,20 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          "bg-accent text-accent-foreground shadow-[0_1px_0_rgba(255,255,255,0.15)_inset,0_8px_24px_-8px_rgba(139,92,246,0.55)] hover:brightness-110 hover:-translate-y-px",
+          "bg-accent text-accent-foreground shadow-[0_1px_2px_rgba(36,86,214,0.24),0_8px_20px_-10px_rgba(36,86,214,0.55)] hover:bg-accent-hover hover:-translate-y-px",
+        accent:
+          "bg-accent text-accent-foreground shadow-[0_1px_2px_rgba(36,86,214,0.24),0_8px_20px_-10px_rgba(36,86,214,0.55)] hover:bg-accent-hover hover:-translate-y-px",
+        dark:
+          "bg-[#0f172a] text-white shadow-[0_8px_20px_-10px_rgba(15,23,42,0.5)] hover:bg-[#111827] hover:-translate-y-px dark:bg-foreground dark:text-background",
         secondary:
-          "bg-muted text-foreground border border-border hover:bg-background-subtle hover:border-accent/40",
+          "bg-card text-foreground border border-border shadow-sm hover:bg-muted",
         outline:
-          "border border-border bg-transparent hover:bg-muted hover:border-accent/40",
+          "border border-border bg-transparent hover:bg-muted",
         ghost: "hover:bg-muted text-muted-foreground hover:text-foreground",
         danger:
-          "bg-danger text-white shadow-[0_8px_24px_-8px_rgba(239,68,68,0.5)] hover:brightness-110",
+          "bg-danger text-white shadow-[0_8px_20px_-10px_rgba(220,38,38,0.55)] hover:brightness-105",
         success:
-          "bg-success text-white shadow-[0_8px_24px_-8px_rgba(16,185,129,0.5)] hover:brightness-110",
+          "bg-success text-white shadow-[0_8px_20px_-10px_rgba(22,163,74,0.55)] hover:brightness-105",
         glass:
           "glass text-foreground hover:border-accent/40",
       },

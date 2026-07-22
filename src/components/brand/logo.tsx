@@ -1,59 +1,41 @@
 import { cn } from "@/lib/utils";
 
-export function LogoMark({ size = 32, className }: { size?: number; className?: string }) {
+/**
+ * MC Nexus mark — a minimal compass: a ring with a four-point needle.
+ * Ring uses currentColor (adapts to context); the needle is the accent blue.
+ */
+export function LogoMark({ size = 34, className }: { size?: number; className?: string }) {
   return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 48 48"
-      fill="none"
-      className={cn("shrink-0", className)}
-      aria-hidden
-    >
-      <defs>
-        <linearGradient id="nx-g" x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse">
-          <stop stopColor="#a78bfa" />
-          <stop offset="0.5" stopColor="#8b5cf6" />
-          <stop offset="1" stopColor="#6366f1" />
-        </linearGradient>
-      </defs>
-      <rect x="1.5" y="1.5" width="45" height="45" rx="13" fill="url(#nx-g)" opacity="0.14" />
-      <rect
-        x="1.5"
-        y="1.5"
-        width="45"
-        height="45"
-        rx="13"
-        stroke="url(#nx-g)"
-        strokeWidth="1.5"
-        opacity="0.5"
-      />
-      {/* Stylised N formed from a network node path */}
-      <path
-        d="M15 33V15L33 33V15"
-        stroke="url(#nx-g)"
-        strokeWidth="3.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <circle cx="15" cy="15" r="3" fill="#a78bfa" />
-      <circle cx="33" cy="33" r="3" fill="#6366f1" />
+    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" className={cn("shrink-0", className)} aria-hidden>
+      <circle cx="24" cy="24" r="21" stroke="currentColor" strokeOpacity="0.24" strokeWidth="1.5" />
+      <circle cx="24" cy="24" r="16" stroke="currentColor" strokeOpacity="0.12" strokeWidth="1" />
+      <path d="M24 7 L28.5 21 L24 24 L19.5 21 Z" fill="#2456d6" />
+      <path d="M24 41 L19.5 27 L24 24 L28.5 27 Z" fill="#2456d6" fillOpacity="0.45" />
+      <circle cx="24" cy="24" r="2" fill="#2456d6" />
+      <circle cx="41" cy="24" r="1.3" fill="currentColor" fillOpacity="0.3" />
+      <circle cx="7" cy="24" r="1.3" fill="currentColor" fillOpacity="0.3" />
     </svg>
   );
 }
 
-export function Logo({ size = 32, showText = true }: { size?: number; showText?: boolean }) {
+export function Logo({
+  size = 34,
+  showText = true,
+  tone = "auto",
+}: {
+  size?: number;
+  showText?: boolean;
+  tone?: "auto" | "light" | "dark";
+}) {
+  const textColor = tone === "light" ? "text-white" : tone === "dark" ? "text-[#111827]" : "text-foreground";
+  const subColor = tone === "light" ? "text-white/45" : "text-muted-foreground";
   return (
-    <div className="flex items-center gap-2.5">
+    <div className={cn("flex items-center gap-2.5", textColor)}>
       <LogoMark size={size} />
       {showText && (
         <div className="leading-none">
-          <div className="text-[15px] font-bold tracking-tight">
-            NEXUS <span className="text-gradient">HQ</span>
-          </div>
-          <div className="mt-1 text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
-            Mission Control
-          </div>
+          <div className="text-[15px] font-semibold tracking-tight">MC Nexus</div>
+          <div className={cn("mt-1 text-[10px] font-medium uppercase tracking-[0.18em]", subColor)}>Mission Control</div>
         </div>
       )}
     </div>

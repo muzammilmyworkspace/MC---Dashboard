@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
+import { toast } from "sonner";
 import {
   Search,
   Bell,
@@ -14,6 +15,7 @@ import {
   Check,
   ChevronDown,
   LogOut,
+  Menu as MenuIcon,
   User as UserIcon,
   Settings,
   ShieldCheck,
@@ -26,17 +28,17 @@ import { Button } from "@/components/ui/button";
 import { relativeTime, cn } from "@/lib/utils";
 
 const toneColor: Record<string, string> = {
-  success: "#10b981",
+  success: "#16a34a",
   warning: "#f59e0b",
-  danger: "#ef4444",
-  info: "#3b82f6",
-  accent: "#8b5cf6",
+  danger: "#dc2626",
+  info: "#2456d6",
+  accent: "#2456d6",
 };
 
 export function Topbar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { setCommandOpen, viewAs, setViewAs } = useUI();
+  const { setCommandOpen, viewAs, setViewAs, setMobileNavOpen } = useUI();
   const { theme, setTheme } = useTheme();
   const [notifs, setNotifs] = useState(notifications);
   const unread = notifs.filter((n) => !n.read).length;
@@ -48,49 +50,37 @@ export function Topbar() {
 
   return (
     <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-border bg-background/70 px-4 backdrop-blur-xl md:px-6">
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span>NEXUS HQ</span>
+      <button
+        onClick={() => setMobileNavOpen(true)}
+        className="flex size-9 items-center justify-center rounded-lg border border-border text-muted-foreground transition-colors hover:border-accent/40 hover:text-foreground md:hidden"
+        aria-label="Open menu"
+      >
+        <MenuIcon className="size-4" />
+      </button>
+      <div className="min-w-0 shrink">
+        <div className="hidden items-center gap-2 text-xs text-muted-foreground sm:flex">
+          <span>MC Nexus</span>
           <span className="opacity-40">/</span>
           <span className="text-foreground">{title}</span>
         </div>
         <h1 className="truncate text-lg font-semibold tracking-tight">{title}</h1>
       </div>
 
-      {/* Search trigger */}
+      {/* Primary search — wide */}
       <button
         onClick={() => setCommandOpen(true)}
-        className="hidden h-9 w-64 items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 text-sm text-muted-foreground transition-colors hover:border-accent/40 lg:flex"
+        className="hidden h-10 max-w-2xl flex-1 items-center gap-2.5 rounded-xl border border-border bg-muted/50 px-4 text-sm text-muted-foreground transition-colors hover:border-accent/40 hover:bg-muted md:flex"
       >
-        <Search className="size-4" />
-        <span>Search anything…</span>
-        <kbd className="ml-auto rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px]">⌘K</kbd>
+        <Search className="size-4 shrink-0" />
+        <span className="truncate">Search tasks, campaigns, content, pages…</span>
+        <kbd className="ml-auto shrink-0 rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px]">⌘K</kbd>
       </button>
 
-      <Button size="sm" className="hidden sm:inline-flex" onClick={() => router.push("/tasks")}>
-        <Plus className="size-4" /> New
-      </Button>
+      <div className="flex-1 md:hidden" />
 
-      {/* Role switcher */}
-      <DropdownMenu.Root>
-        <DropdownMenu.Trigger asChild>
-          <button className="hidden items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs font-medium transition-colors hover:border-accent/40 md:flex">
-            <ShieldCheck className="size-3.5 text-accent" />
-            <span className="text-muted-foreground">Viewing as</span>
-            <span>{roleLabel[viewAs]}</span>
-            <ChevronDown className="size-3.5 text-muted-foreground" />
-          </button>
-        </DropdownMenu.Trigger>
-        <Menu>
-          <MenuLabel>Preview permissions as</MenuLabel>
-          {(["super_admin", "team_member", "client"] as Role[]).map((r) => (
-            <MenuItem key={r} onSelect={() => setViewAs(r)}>
-              <span className="flex-1">{roleLabel[r]}</span>
-              {viewAs === r && <Check className="size-4 text-accent" />}
-            </MenuItem>
-          ))}
-        </Menu>
-      </DropdownMenu.Root>
+      <Button size="sm" className="hidden sm:inline-flex" onClick={() => router.push("/calendar")}>
+        <Plus className="size-4" /> New Post
+      </Button>
 
       {/* Theme toggle */}
       <button
@@ -161,18 +151,32 @@ export function Topbar() {
             <Avatar name={viewingUser.name} color={viewingUser.avatarColor} size={34} online />
             <div className="hidden text-left lg:block">
               <div className="text-xs font-semibold leading-tight">{viewingUser.name}</div>
-              <div className="text-[11px] leading-tight text-muted-foreground">{roleLabel[viewingUser.role]}</div>
+              <div className="text-[11px] leading-tight text-muted-foreground">Main Character team</div>
             </div>
             <ChevronDown className="hidden size-3.5 text-muted-foreground lg:block" />
           </button>
         </DropdownMenu.Trigger>
-        <Menu align="end" width={220}>
-          <div className="border-b border-border px-3 py-2.5">
-            <div className="text-sm font-semibold">{viewingUser.name}</div>
-            <div className="text-xs text-muted-foreground">{viewingUser.email}</div>
+        <Menu align="end" width={240}>
+          <div className="flex items-center gap-3 border-b border-border px-3 py-3">
+            <Avatar name={viewingUser.name} color={viewingUser.avatarColor} size={38} />
+            <div className="min-w-0">
+              <div className="truncate text-sm font-semibold">{viewingUser.name}</div>
+              <div className="truncate text-xs text-muted-foreground">{viewingUser.email}</div>
+              <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-accent/10 px-1.5 py-0.5 text-[10px] font-semibold text-accent">
+                <ShieldCheck className="size-2.5" /> {roleLabel[viewingUser.role]}
+              </span>
+            </div>
           </div>
-          <MenuItem onSelect={() => router.push("/team")}><UserIcon className="size-4" /> Profile</MenuItem>
-          <MenuItem onSelect={() => router.push("/settings")}><Settings className="size-4" /> Settings</MenuItem>
+          <MenuLabel>Viewing as (demo)</MenuLabel>
+          {(["super_admin", "team_member", "client"] as Role[]).map((r) => (
+            <MenuItem key={r} onSelect={() => setViewAs(r)}>
+              <span className="flex-1">{roleLabel[r]}</span>
+              {viewAs === r && <Check className="size-4 text-accent" />}
+            </MenuItem>
+          ))}
+          <div className="my-1 h-px bg-border" />
+          <MenuItem onSelect={() => toast("Profile", { description: "Personal profile & preferences — coming soon." })}><UserIcon className="size-4" /> Profile</MenuItem>
+          <MenuItem onSelect={() => toast("Settings", { description: "Workspace settings — coming soon." })}><Settings className="size-4" /> Settings</MenuItem>
           <div className="my-1 h-px bg-border" />
           <MenuItem onSelect={() => router.push("/login")} danger>
             <LogOut className="size-4" /> Sign out

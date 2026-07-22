@@ -31,20 +31,20 @@ export function PerformanceChart() {
       <AreaChart data={weeklyPerformance} margin={{ top: 10, right: 6, left: -18, bottom: 0 }}>
         <defs>
           <linearGradient id="gReach" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.5} />
-            <stop offset="100%" stopColor="#8b5cf6" stopOpacity={0} />
+            <stop offset="0%" stopColor="#2456d6" stopOpacity={0.5} />
+            <stop offset="100%" stopColor="#2456d6" stopOpacity={0} />
           </linearGradient>
           <linearGradient id="gEng" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.4} />
-            <stop offset="100%" stopColor="#3b82f6" stopOpacity={0} />
+            <stop offset="0%" stopColor="#93c5fd" stopOpacity={0.45} />
+            <stop offset="100%" stopColor="#93c5fd" stopOpacity={0} />
           </linearGradient>
         </defs>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
         <XAxis dataKey="day" tickLine={false} axisLine={false} tick={{ fill: "var(--muted-foreground)", fontSize: 11 }} />
         <YAxis tickLine={false} axisLine={false} tick={{ fill: "var(--muted-foreground)", fontSize: 11 }} />
         <Tooltip contentStyle={tooltipStyle} cursor={{ stroke: "var(--accent)", strokeWidth: 1, strokeDasharray: "4 4" }} />
-        <Area type="monotone" dataKey="reach" stroke="#8b5cf6" strokeWidth={2.5} fill="url(#gReach)" name="Reach (k)" />
-        <Area type="monotone" dataKey="engagement" stroke="#3b82f6" strokeWidth={2.5} fill="url(#gEng)" name="Engagement (k)" />
+        <Area type="monotone" dataKey="reach" stroke="#2456d6" strokeWidth={2.5} fill="url(#gReach)" name="Reach (k)" />
+        <Area type="monotone" dataKey="engagement" stroke="#60a5fa" strokeWidth={2.5} fill="url(#gEng)" name="Engagement (k)" />
       </AreaChart>
     </ResponsiveContainer>
   );
@@ -81,7 +81,7 @@ export function RoasLine() {
         <XAxis dataKey="m" tickLine={false} axisLine={false} tick={{ fill: "var(--muted-foreground)", fontSize: 11 }} />
         <YAxis tickLine={false} axisLine={false} tick={{ fill: "var(--muted-foreground)", fontSize: 11 }} domain={[0, 5]} />
         <Tooltip contentStyle={tooltipStyle} formatter={(v) => [`${v}x`, "ROAS"]} />
-        <Line type="monotone" dataKey="roas" stroke="#10b981" strokeWidth={2.5} dot={{ r: 3, fill: "#10b981" }} activeDot={{ r: 5 }} />
+        <Line type="monotone" dataKey="value" stroke="#16a34a" strokeWidth={2.5} dot={{ r: 3, fill: "#16a34a" }} activeDot={{ r: 5 }} />
       </LineChart>
     </ResponsiveContainer>
   );

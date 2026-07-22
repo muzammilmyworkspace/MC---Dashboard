@@ -1,80 +1,87 @@
-# NEXUS HQ — Mission Control
+# MC Nexus — Mission Control
 
-**One Dashboard. Every Task. Total Visibility.**
+**The command center for content, marketing, approvals, and collaboration.**
 
-A premium client-collaboration & digital-marketing operations dashboard — the
-frontend MVP foundation for the full NEXUS HQ platform. Built to feel like a
-$200/month SaaS product: dark-mode-first, glass, violet accent, smooth motion.
+A premium, neutral operations dashboard. Light-mode-first — soft grey canvas, white cards,
+refined slate sidebar, a single understated **blue** accent reserved for important actions.
+Designed to feel like Apple × Linear × Notion × Stripe: calm, spacious, whitespace-led,
+and immediately understandable for non-technical users.
 
 ## Tech
 
 - **Next.js 16** (App Router, Turbopack) · **React 19** · **TypeScript**
-- **Tailwind CSS v4** (CSS-based design tokens, dark-mode-first)
-- **Framer Motion** (page transitions, micro-interactions, animated counters)
-- **Recharts** (performance / channel / ROAS charts)
-- **Radix UI** primitives · **cmdk** (⌘K command palette) · **Zustand** (UI state)
-- **sonner** (toasts) · **canvas-confetti** (approval celebration) · **next-themes**
+- **Tailwind CSS v4** (CSS-based design tokens, light-mode-first, warm luxury palette)
+- **Framer Motion** (sidebar collapse, date selection, tab & content transitions, counters)
+- **Recharts** · **Radix UI** · **cmdk** (⌘K) · **Zustand** · **sonner** · **canvas-confetti**
 
 ## Getting started
 
 ```bash
-npm install      # already done during scaffold
+npm install
 npm run dev      # http://localhost:3000
 npm run build    # production build
 npm run lint     # eslint
 ```
 
-Open **http://localhost:3000** → animated splash → login. Use a **demo account**
-button (Admin / Team / Client) to jump straight in.
+> Note: don't run `next build` and `next dev` against the same `.next` folder back-to-back —
+> Turbopack shares that cache and it can corrupt. If dev starts 500ing, `rm -rf .next` and restart.
+
+Open **http://localhost:3000** → splash → login. Pick a **demo profile** to sign in:
+
+| Profile | Role | Lands on |
+|---------|------|----------|
+| **Muzammil** | Super Admin | Dashboard (full workspace) |
+| **Hashaam** | Team Member | Dashboard (creative modules) |
+| **Onyema** | Client | Calendar (review & approve) |
+
+The sidebar adapts to the signed-in role. Switch roles live from the topbar "Viewing as" menu.
 
 ## What's fully interactive in this MVP
 
 | Area | Highlights |
 |------|-----------|
-| **Splash + Login** | Animated logo, aurora background, brand-name rotator, demo-role sign-in, Google-ready, 2FA-ready |
-| **App shell** | Collapsible animated sidebar (favorites, filter, badges), topbar with role switcher, notifications, theme toggle, **⌘K command palette**, mobile bottom nav |
-| **Dashboard** | Animated KPI counters, weekly performance area chart, channel donut, ROAS trend, campaign-health bars, live activity feed, approvals & meetings |
-| **Tasks** | Kanban board with **drag-and-drop** between columns, list view, search, full **task detail drawer** (checklist, priority/status changers, time tracking, comments) |
-| **Content Approval** | Filterable content grid, detail drawer with workflow stepper, caption/hashtags, comment thread, **Approve → confetti 🎉** / Request Changes |
-| **Every other module** | Tailored, on-brand shells with feature lists, skeleton previews, and Phase-2 **integration status** panels (Connect / Not Connected / last sync) |
+| **Login** | Premium dark branding panel + feature highlights; glass sign-in card; Google button; three quick-access demo profiles (avatar, name, role, email); "Demo Workspace" |
+| **Sidebar** | Refined slate hierarchy, always-icons, Linear-style expand/collapse (remembers state); pinned Dashboard + Calendar; **drag-and-drop tasks (dnd-kit)** between **Muzammil Tasks · Hashaam Tasks · Future Assignments** with ghost overlay, drop indicators & auto-save; Future shows an empty "Drop tasks here" state |
+| **Social Media Calendar** (the heart) | Month/year header + prev/next/today; animated horizontal date strip with content dots; **click a date → instant day load**; split editor / preview workspace |
+| ↳ Editor (left) | Platform tabs (IG/FB/LI/TikTok/YT); inline **Edit → Save / Cancel**; **Translate EN ⇄ NL**; title, caption, hashtags, CTA, time, status |
+| ↳ Preview + Review (right) | Image / Reel / **Carousel** preview with premium shadow; approval **workflow stepper**; comment box + **Approve → confetti 🎉 / Needs Changes / Rejected**; review history timeline |
+| **Dashboard** | Calm overview — KPIs, "Awaiting Review" queue, channel split, weekly performance, activity, upcoming |
+| **Every other module** | Muzammil/Hashaam modules → tailored "building" preview shells; **Phase 2 + Future Assignments → premium "Coming Soon"** pages |
+
+## Design tokens
+
+Defined in `src/app/globals.css`. Palette:
+`#F5F7FA` canvas · `#FFFFFF` cards · `#0F172A` slate sidebar · `#E5E7EB` borders ·
+`#111827`/`#6B7280` text · `#F3F4F6` hover · **`#2563EB` blue accent** (`#1D4ED8` hover) ·
+`#16A34A` success · `#F59E0B` warning · `#DC2626` danger. No gold, no purple.
+Clean Geist typography; whitespace as the primary design element.
 
 ## Architecture
 
 ```
 src/
   app/
-    page.tsx              splash screen
-    login/                animated auth
-    (app)/                authenticated shell (sidebar + topbar + ⌘K)
-      dashboard/          KPIs, charts, activity
-      tasks/              kanban + detail drawer
-      approvals/          content approval workflow
-      [...slug]/          catch-all → tailored module shells
+    page.tsx              splash
+    login/                branding + demo profiles
+    (app)/
+      dashboard/          calm overview
+      calendar/           ★ Social Media Calendar (the heart)
+      [...slug]/          catch-all → building shells / Coming Soon / Future
   components/
-    ui/                   button, card, badge, avatar, dialog, input, progress, tooltip…
-    layout/               sidebar, topbar, command-palette, mobile-nav, page-transition
-    charts/               recharts wrappers
-    tasks/                task detail drawer
-    brand/                logo
+    calendar/             content-editor · preview-review
+    layout/               sidebar · topbar · command-palette · mobile-nav · page-transition
+    ui/ charts/ brand/
   lib/
-    data.ts               mock data layer  (swap for API/Prisma in Phase 2)
-    nav.ts                sidebar navigation config
-    modules.ts            per-module metadata for shells
-    store.ts              zustand UI state
-    utils.ts / confetti.ts
+    data.ts               users + calendar posts + dashboard mock data
+    nav.ts                role-aware navigation
+    modules.ts            per-module metadata (building vs phase2)
+    store.ts / utils.ts / confetti.ts
 ```
 
-## Design system
+## Phase 2
 
-Tokens live in `src/app/globals.css` (`:root` + `.dark`). Brand palette:
-Primary `#0F172A` · Accent `#8B5CF6` · Success `#10B981` · Warning `#F59E0B`
-· Danger `#EF4444`. Semantic Tailwind utilities: `bg-card`, `text-muted-foreground`,
-`border-border`, `bg-accent`, `.glass`, `.text-gradient`, `.shadow-glow`.
-
-## Phase 2 (backend & live data)
-
-The data layer (`lib/data.ts`) and module "integration" panels are deliberately
-seam-lined so you can drop in:
-Express + Prisma + PostgreSQL · JWT + RBAC · Socket.io real-time · and the
-Meta / Google Ads / GA4 / TikTok / YouTube / LinkedIn service integrations
-without reworking the UI.
+Ads (Meta/Google), Analytics (GA4), Search Console, Workspace and the social channels are
+scaffolded with integration panels. CRM, Lead Pipeline, Invoices, Finance, AI Assistant,
+Meeting Notes, Knowledge Base, Analytics Hub, Automation Center, Reports, Client Portal,
+Password Vault, API Integrations and Advanced User Management ship as premium "Coming Soon"
+pages — ready to build on the same design system.

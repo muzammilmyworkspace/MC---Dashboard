@@ -8,7 +8,7 @@ interface AvatarProps extends React.HTMLAttributes<HTMLDivElement> {
   online?: boolean;
 }
 
-export function Avatar({ name, color = "#8b5cf6", size = 36, online, className, ...props }: AvatarProps) {
+export function Avatar({ name, color = "#2456d6", size = 36, online, className, ...props }: AvatarProps) {
   return (
     <div
       className={cn("relative inline-flex shrink-0 items-center justify-center rounded-full font-semibold text-white ring-2 ring-background", className)}

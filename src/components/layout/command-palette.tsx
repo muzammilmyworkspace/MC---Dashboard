@@ -6,17 +6,16 @@ import { Command } from "cmdk";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus,
-  CheckSquare,
-  BadgeCheck,
-  KeyRound,
-  MessagesSquare,
+  Search as SearchIcon,
+  CalendarDays,
+  Home,
   Moon,
   Sun,
   ArrowRight,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useUI } from "@/lib/store";
-import { allNavItems } from "@/lib/nav";
+import { allNavItems, phase2Hrefs } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 
 export function CommandPalette() {
@@ -42,10 +41,9 @@ export function CommandPalette() {
   }
 
   const quickActions = [
-    { label: "Create new task", icon: Plus, action: () => go("/tasks") },
-    { label: "Review pending approvals", icon: BadgeCheck, action: () => go("/approvals") },
-    { label: "Open password vault", icon: KeyRound, action: () => go("/vault") },
-    { label: "Open team chat", icon: MessagesSquare, action: () => go("/chat") },
+    { label: "Open Social Media Posting", icon: CalendarDays, action: () => go("/calendar") },
+    { label: "Review content awaiting approval", icon: Plus, action: () => go("/calendar") },
+    { label: "Go to Dashboard", icon: Home, action: () => go("/dashboard") },
     {
       label: theme === "dark" ? "Switch to light mode" : "Switch to dark mode",
       icon: theme === "dark" ? Sun : Moon,
@@ -76,7 +74,7 @@ export function CommandPalette() {
           >
             <Command className="w-full" loop>
               <div className="flex items-center gap-3 border-b border-border px-4">
-                <CheckSquare className="size-4 text-muted-foreground" />
+                <SearchIcon className="size-4 text-muted-foreground" />
                 <Command.Input
                   autoFocus
                   placeholder="Search modules, run an action…"
@@ -116,7 +114,7 @@ export function CommandPalette() {
                         <item.icon className="size-4 text-muted-foreground" />
                       </span>
                       <span className="flex-1">{item.label}</span>
-                      {!item.live && (
+                      {phase2Hrefs.includes(item.href) && (
                         <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] uppercase text-muted-foreground/70">soon</span>
                       )}
                       <ArrowRight className={cn("size-3.5 text-muted-foreground opacity-0 group-data-[selected=true]:opacity-100")} />

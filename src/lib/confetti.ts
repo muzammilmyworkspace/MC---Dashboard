@@ -1,7 +1,7 @@
 import confetti from "canvas-confetti";
 
 export function celebrate() {
-  const colors = ["#8b5cf6", "#a78bfa", "#6366f1", "#10b981", "#ffffff"];
+  const colors = ["#2456d6", "#3b82f6", "#93c5fd", "#16a34a", "#ffffff"];
   const end = Date.now() + 700;
 
   (function frame() {

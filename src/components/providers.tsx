@@ -5,16 +5,16 @@ import { Toaster } from "sonner";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
-    <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false} disableTransitionOnChange>
+    <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} disableTransitionOnChange>
       {children}
       <Toaster
-        theme="dark"
         position="bottom-right"
         toastOptions={{
           style: {
             background: "var(--card)",
             border: "1px solid var(--border)",
             color: "var(--foreground)",
+            borderRadius: "0.75rem",
           },
         }}
       />
