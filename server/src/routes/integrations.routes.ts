@@ -403,7 +403,7 @@ export const metaCallbackRouter = Router();
  * page that started the flow never saw the result.
  */
 function dashboardUrl(params: Record<string, string>): string {
-  const base = corsOrigins[0] ?? "http://localhost:3002";
+  const base = corsOrigins[0] ?? "http://localhost:4300";
   const qs = new URLSearchParams(params).toString();
   return `${base}/instagram?${qs}`;
 }

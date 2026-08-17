@@ -8,6 +8,7 @@ import { Logo, LogoMark } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useUI } from "@/lib/store";
+import { api, ApiRequestError } from "@/lib/api";
 import { users, roleLabel, type Role, type User } from "@/lib/data";
 import { initials, cn } from "@/lib/utils";
 
@@ -22,27 +23,59 @@ export default function LoginPage() {
   const router = useRouter();
   const signIn = useUI((s) => s.signIn);
   const [email, setEmail] = useState(users[0].email);
-  const [password, setPassword] = useState("maincharacter");
+  // Local seed password (see SEED_PASSWORD in server/.env.example) so the
+  // demo profile buttons work in one click. Remove this default before any
+  // deployment that is reachable from outside localhost.
+  const [password, setPassword] = useState("MainCharacter#2026");
   const [show, setShow] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  function login(role?: Role) {
-    if (!email.includes("@") || password.length < 4) {
+  /**
+   * Authenticates against the API rather than just flipping local state.
+   *
+   * This used to call signIn() straight away, so the sidebar showed you as
+   * signed in while the server had never issued a token — every API call
+   * then failed with 401 and the dashboard looked broken for no visible
+   * reason. The access token now comes from the server, and the refresh
+   * cookie it sets is what survives a page reload.
+   *
+   * `emailArg` exists because the demo buttons call this in the same tick as
+   * setEmail(), before the state update has landed.
+   */
+  async function login(emailArg?: string) {
+    const address = emailArg ?? email;
+
+    if (!address.includes("@") || password.length < 4) {
       setError("Enter a valid email and a password of at least 4 characters.");
       return;
     }
     setError("");
     setLoading(true);
-    const resolved: Role = role ?? users.find((u) => u.email === email)?.role ?? "team";
-    signIn(resolved);
-    const dest = resolved === "client" ? "/calendar" : "/dashboard";
-    setTimeout(() => router.push(dest), 700);
+
+    try {
+      const user = await api.auth.login(address, password);
+      // The server is the authority on role; the UI type is lower-case.
+      const resolved: Role = user.role === "CLIENT" ? "client" : "team";
+      signIn(resolved);
+      router.push(resolved === "client" ? "/calendar" : "/dashboard");
+    } catch (err) {
+      setLoading(false);
+      if (err instanceof ApiRequestError) {
+        setError(
+          err.status === 401
+            ? "Wrong email or password."
+            : `${err.message} (API said ${err.status})`
+        );
+      } else {
+        setError("Can't reach the API. Start the backend with \"npm run dev\" in server/.");
+      }
+    }
   }
 
   function pickProfile(u: User) {
     setEmail(u.email);
-    login(u.role);
+    void login(u.email);
   }
 
   return (
@@ -147,7 +180,7 @@ export default function LoginPage() {
               </span>
             </div>
 
-            <Button variant="secondary" size="lg" className="w-full" onClick={() => login()}>
+            <Button variant="secondary" size="lg" className="w-full" onClick={() => void login()}>
               <GoogleIcon /> Continue with Google
             </Button>
 

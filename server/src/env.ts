@@ -11,10 +11,11 @@ const schema = z.object({
   ACCESS_TOKEN_TTL: z.string().default("15m"),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().default(30),
 
-  // 3002: 3000 and 3001 are taken by other apps on this dev machine. The
-  // OAuth callback redirects to this origin, so a stale value would hand the
-  // connection result to whatever else is listening.
-  CORS_ORIGIN: z.string().default("http://localhost:3002"),
+  // 4300, deliberately far from 3000: another Next app on this machine
+  // auto-increments 3000 -> 3001 -> 3002 and steals whichever is free. The
+  // OAuth callback redirects to this origin, so losing the port would hand
+  // the connection result to a different application.
+  CORS_ORIGIN: z.string().default("http://localhost:4300"),
   COOKIE_DOMAIN: z.string().optional(),
 
   // Credential encryption (64 hex chars). Falls back to a derived key in dev.
