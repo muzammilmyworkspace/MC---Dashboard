@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { toast } from "sonner";
+
 import {
   Search,
   Bell,
@@ -38,7 +38,7 @@ const toneColor: Record<string, string> = {
 export function Topbar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { setCommandOpen, viewAs, setViewAs, setMobileNavOpen } = useUI();
+  const { setCommandOpen, viewAs, setViewAs, setMobileNavOpen, signOut } = useUI();
   const { theme, setTheme } = useTheme();
   const [notifs, setNotifs] = useState(notifications);
   const unread = notifs.filter((n) => !n.read).length;
@@ -168,17 +168,17 @@ export function Topbar() {
             </div>
           </div>
           <MenuLabel>Viewing as (demo)</MenuLabel>
-          {(["super_admin", "team_member", "client"] as Role[]).map((r) => (
+          {(["team", "client"] as Role[]).map((r) => (
             <MenuItem key={r} onSelect={() => setViewAs(r)}>
               <span className="flex-1">{roleLabel[r]}</span>
               {viewAs === r && <Check className="size-4 text-accent" />}
             </MenuItem>
           ))}
           <div className="my-1 h-px bg-border" />
-          <MenuItem onSelect={() => toast("Profile", { description: "Personal profile & preferences — coming soon." })}><UserIcon className="size-4" /> Profile</MenuItem>
-          <MenuItem onSelect={() => toast("Settings", { description: "Workspace settings — coming soon." })}><Settings className="size-4" /> Settings</MenuItem>
+          <MenuItem onSelect={() => router.push("/settings")}><UserIcon className="size-4" /> Profile</MenuItem>
+          <MenuItem onSelect={() => router.push("/settings?tab=workspace")}><Settings className="size-4" /> Settings</MenuItem>
           <div className="my-1 h-px bg-border" />
-          <MenuItem onSelect={() => router.push("/login")} danger>
+          <MenuItem onSelect={() => { signOut(); router.replace("/login"); }} danger>
             <LogOut className="size-4" /> Sign out
           </MenuItem>
         </Menu>

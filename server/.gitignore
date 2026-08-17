@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.log
+
+# Local secrets — never commit
+.env
+.env.local
+secrets/
+
+# ...but the template must be tracked (root .gitignore has `.env*`)
+!.env.example

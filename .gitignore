@@ -33,6 +33,13 @@ dev.log
 
 # env files (can opt-in for committing if needed)
 .env*
+.env.local
+.env.*.local
+# ...but the templates are meant to be committed — `.env*` above would
+# otherwise swallow them silently and no one would notice until a teammate
+# cloned the repo with no reference for what to fill in.
+!.env.example
+!.env.*.example
 
 # vercel
 .vercel

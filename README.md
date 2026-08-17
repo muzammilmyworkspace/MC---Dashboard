@@ -18,7 +18,7 @@ and immediately understandable for non-technical users.
 
 ```bash
 npm install
-npm run dev      # http://localhost:3000
+npm run dev      # http://localhost:4300
 npm run build    # production build
 npm run lint     # eslint
 ```
@@ -26,7 +26,7 @@ npm run lint     # eslint
 > Note: don't run `next build` and `next dev` against the same `.next` folder back-to-back —
 > Turbopack shares that cache and it can corrupt. If dev starts 500ing, `rm -rf .next` and restart.
 
-Open **http://localhost:3000** → splash → login. Pick a **demo profile** to sign in:
+Open **http://localhost:4300** → splash → login. Pick a **demo profile** to sign in:
 
 | Profile | Role | Lands on |
 |---------|------|----------|
@@ -78,10 +78,46 @@ src/
     store.ts / utils.ts / confetti.ts
 ```
 
-## Phase 2
+## Phase 2 — Backend API (`server/`)
 
-Ads (Meta/Google), Analytics (GA4), Search Console, Workspace and the social channels are
-scaffolded with integration panels. CRM, Lead Pipeline, Invoices, Finance, AI Assistant,
-Meeting Notes, Knowledge Base, Analytics Hub, Automation Center, Reports, Client Portal,
-Password Vault, API Integrations and Advanced User Management ship as premium "Coming Soon"
-pages — ready to build on the same design system.
+The backend is built and lives in [`server/`](server) — Express + TypeScript, PostgreSQL via
+Prisma, JWT auth with rotating refresh tokens, RBAC, Socket.io realtime, Nodemailer, audit
+logging, and a modular integration layer for all 15 planned APIs.
+
+```bash
+cd server
+cp .env.example .env      # set the two JWT secrets
+docker compose up -d      # PostgreSQL
+npm install && npm run setup   # schema + seed (team, July plan, integrations)
+npm run dev               # http://localhost:4000  ·  /health
+```
+
+Seeded logins (password from `SEED_PASSWORD`, default `MainCharacter#2026`):
+`muzammil.myworkspace@gmail.com` (Admin) · `hashaamzafar999@gmail.com` (Team) ·
+`onyema@maincharacter.nl` (Client).
+
+Full API reference, security model and data model: **[server/README.md](server/README.md)**.
+
+### Connecting the frontend
+
+The frontend ships a typed client and realtime hook that are ready to use:
+
+```ts
+import { api } from "@/lib/api";          // auth, day-plans, integrations, dashboard…
+import { useRealtime } from "@/lib/realtime";
+
+const user = await api.auth.login(email, password);
+const { plans } = await api.dayPlans.list("2026-07");
+useRealtime("dayplan:updated", (plan) => { /* live approvals */ });
+```
+
+Point it at the API with `NEXT_PUBLIC_API_URL` in `.env.local` (defaults to
+`http://localhost:4000`). Access tokens are held in memory and refreshed silently via an
+httpOnly cookie. The UI still renders the seeded mock data in `src/lib/` until the pages are
+switched over to `api.*` — that swap is the remaining step.
+
+### Still "Coming Soon"
+
+CRM, Lead Pipeline, Invoices, Finance, AI Assistant, Meeting Notes, Knowledge Base,
+Analytics Hub, Automation Center, Reports, Client Portal and Password Vault remain premium
+placeholder pages, ready to build on the same design system.

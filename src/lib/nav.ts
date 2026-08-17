@@ -32,6 +32,9 @@ import {
   Plug,
   UserCog,
   Filter,
+  Plus,
+  Settings,
+  ServerCog,
   type LucideIcon,
 } from "lucide-react";
 import { type Role } from "./data";
@@ -47,6 +50,9 @@ export interface NavItem {
 export const itemMeta: Record<string, { label: string; icon: LucideIcon }> = {
   "/dashboard": { label: "Dashboard", icon: Home },
   "/calendar": { label: "Social Media Posting", icon: CalendarDays },
+  "/add-task": { label: "Add Task", icon: Plus },
+  "/settings": { label: "Settings", icon: Settings },
+  "/deployments": { label: "Deployment Center", icon: ServerCog },
 
   // Muzammil
   "/google-ads": { label: "Google Ads", icon: BarChart3 },
@@ -97,6 +103,19 @@ export function itemFor(href: string): NavItem {
 /* Pinned — fixed at the top, never scrolls away. */
 export const pinnedItems: NavItem[] = [{ ...itemFor("/dashboard") }];
 
+/**
+ * Clients get a deliberately tiny menu: the two screens they actually need.
+ * The team gets the pinned Dashboard plus the full task sections below it.
+ */
+export function pinnedForRole(role: Role): NavItem[] {
+  return role === "client" ? [itemFor("/dashboard"), itemFor("/calendar")] : [itemFor("/dashboard")];
+}
+
+/** Action shown at the top of a section (not draggable, not a task). */
+export const sectionActions: Partial<Record<SectionKey, NavItem>> = {
+  future: itemFor("/add-task"),
+};
+
 /* Draggable task sections. */
 export type SectionKey = "muzammil" | "hashaam" | "future";
 
@@ -108,6 +127,7 @@ export interface SidebarSections {
 
 export const defaultSections: SidebarSections = {
   muzammil: [
+    "/deployments",
     "/google-ads",
     "/meta-ads",
     "/analytics",
@@ -127,9 +147,9 @@ export const defaultSections: SidebarSections = {
 };
 
 export const sectionMeta: { key: SectionKey; title: string; roles: Role[] }[] = [
-  { key: "muzammil", title: "Muzammil Tasks", roles: ["super_admin"] },
-  { key: "hashaam", title: "Hashaam Tasks", roles: ["super_admin", "team_member"] },
-  { key: "future", title: "Future Assignments", roles: ["super_admin", "team_member"] },
+  { key: "muzammil", title: "Muzammil Tasks", roles: ["team"] },
+  { key: "hashaam", title: "Hashaam Tasks", roles: ["team"] },
+  { key: "future", title: "Future Assignments", roles: ["team"] },
 ];
 
 /* Phase 2 items — reachable via ⌘K but not shown in the sidebar. */
@@ -155,4 +175,12 @@ export const allNavItems: NavItem[] = Object.keys(itemMeta).map((href) => itemFo
 
 export function sectionsForRole(role: Role): SectionKey[] {
   return sectionMeta.filter((s) => s.roles.includes(role)).map((s) => s.key);
+}
+
+/** Routes a client may open. Everything else is team-only. */
+const CLIENT_ROUTES = ["/dashboard", "/calendar", "/settings"];
+
+export function canAccess(role: Role, pathname: string): boolean {
+  if (role === "team") return true;
+  return CLIENT_ROUTES.some((r) => pathname === r || pathname.startsWith(`${r}/`));
 }
