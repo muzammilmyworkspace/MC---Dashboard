@@ -14,9 +14,12 @@ interface UIState {
   mobileNavOpen: boolean;
   setMobileNavOpen: (v: boolean) => void;
 
-  // Preview-only role switcher to demo the permission matrix
+  // Session
+  authed: boolean;
   viewAs: Role;
   setViewAs: (r: Role) => void;
+  signIn: (r: Role) => void;
+  signOut: () => void;
 
   // Draggable sidebar task layout (persisted)
   sections: SidebarSections;
@@ -41,8 +44,11 @@ export const useUI = create<UIState>()(
       mobileNavOpen: false,
       setMobileNavOpen: (v) => set({ mobileNavOpen: v }),
 
-      viewAs: "super_admin",
+      authed: false,
+      viewAs: "team",
       setViewAs: (r) => set({ viewAs: r }),
+      signIn: (r) => set({ authed: true, viewAs: r }),
+      signOut: () => set({ authed: false }),
 
       sections: defaultSections,
       setSections: (s) => set({ sections: s }),
@@ -52,8 +58,14 @@ export const useUI = create<UIState>()(
       toggleSection: (k) => set((s) => ({ expanded: { ...s.expanded, [k]: !s.expanded[k] } })),
     }),
     {
-      name: "mc-nexus-ui-v3",
-      partialize: (s) => ({ collapsed: s.collapsed, viewAs: s.viewAs, sections: s.sections, expanded: s.expanded }),
+      name: "mc-nexus-ui-v4",
+      partialize: (s) => ({
+        collapsed: s.collapsed,
+        viewAs: s.viewAs,
+        sections: s.sections,
+        expanded: s.expanded,
+        authed: s.authed,
+      }),
     }
   )
 );

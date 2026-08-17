@@ -14,10 +14,11 @@ import { Progress } from "@/components/ui/progress";
 import { AnimatedCounter } from "@/components/ui/animated-counter";
 import { PerformanceChart } from "@/components/charts/charts";
 import {
-  activity, dayPlans, platformWidgets, apiConnections,
-  contentStatusMeta, platformMeta, userById, users, currentUser,
+  activity, platformWidgets, apiConnections,
+  userById, users, currentUser,
   type PlatformWidget, type ApiConnection,
 } from "@/lib/data";
+import { usePosting } from "@/lib/posting";
 import { useUI } from "@/lib/store";
 import { relativeTime, formatDate, cn } from "@/lib/utils";
 
@@ -28,22 +29,35 @@ export default function DashboardPage() {
   const { viewAs } = useUI();
   const me = users.find((u) => u.role === viewAs) ?? currentUser;
 
-  const total = dayPlans.length;
-  const counts = {
-    published: dayPlans.filter((p) => p.status === "published").length,
-    scheduled: dayPlans.filter((p) => p.status === "scheduled").length,
-    approved: dayPlans.filter((p) => p.status === "approved").length,
-    waiting: dayPlans.filter((p) => p.status === "client_review" || p.status === "internal_review").length,
-    draft: dayPlans.filter((p) => p.status === "draft").length,
-  };
-  const completion = Math.round(((counts.published + counts.approved + counts.scheduled) / total) * 100);
-  const awaiting = dayPlans.filter((p) => p.status === "client_review" || p.status === "internal_review").slice(0, 5);
+  // Content stats come from what the team has actually planned.
+  const days = usePosting((s) => s.days);
+  const now = new Date();
+  const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+
+  const monthEntries = Object.entries(days).filter(([date, blocks]) => date.startsWith(monthPrefix) && blocks.length > 0);
+  const total = monthEntries.reduce((n, [, blocks]) => n + blocks.length, 0);
+  const daysCovered = monthEntries.length;
+  const withMedia = monthEntries.reduce(
+    (n, [, blocks]) => n + blocks.filter((b) => b.postMedia.length > 0 || b.reelMedia).length,
+    0
+  );
+  const withCopy = monthEntries.reduce(
+    (n, [, blocks]) => n + blocks.filter((b) => Object.values(b.content).some((c) => c.caption.trim())).length,
+    0
+  );
+  const completion = Math.round((daysCovered / daysInMonth) * 100);
+
+  const upcoming = monthEntries
+    .filter(([date]) => date >= `${monthPrefix}-${String(now.getDate()).padStart(2, "0")}`)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .slice(0, 5);
   const connected = apiConnections.filter((a) => a.connected).length;
 
   const kpiCards = [
     { label: "Business Health", value: 94, suffix: "%", delta: 3, icon: Gauge, tone: "#2456d6" },
-    { label: "Monthly Completion", value: completion, suffix: "%", delta: 8, icon: CheckCircle2, tone: "#16a34a" },
-    { label: "Awaiting Approval", value: counts.waiting, suffix: "", delta: -1, icon: BadgeCheck, tone: "#d97706" },
+    { label: "Month Planned", value: completion, suffix: "%", delta: 8, icon: CheckCircle2, tone: "#16a34a" },
+    { label: "Posts Planned", value: total, suffix: "", delta: 0, icon: BadgeCheck, tone: "#d97706" },
     { label: "Reach (30d)", value: 312000, suffix: "", delta: 18, icon: Eye, tone: "#2456d6", compact: true },
   ];
 
@@ -106,11 +120,10 @@ export default function DashboardPage() {
             <div className="mt-4 flex items-center gap-4">
               <ScoreRing value={completion} />
               <div className="flex-1 space-y-2 text-sm">
-                <ProgressRow label="Published" value={counts.published} total={total} color="#0f172a" />
-                <ProgressRow label="Scheduled" value={counts.scheduled} total={total} color="#2456d6" />
-                <ProgressRow label="Approved" value={counts.approved} total={total} color="#16a34a" />
-                <ProgressRow label="Awaiting" value={counts.waiting} total={total} color="#d97706" />
-                <ProgressRow label="Draft" value={counts.draft} total={total} color="#94a3b8" />
+                <ProgressRow label="Days" value={daysCovered} total={daysInMonth} color="#2456d6" />
+                <ProgressRow label="Posts" value={total} total={Math.max(total, daysInMonth)} color="#0f172a" />
+                <ProgressRow label="Written" value={withCopy} total={Math.max(total, 1)} color="#16a34a" />
+                <ProgressRow label="Media" value={withMedia} total={Math.max(total, 1)} color="#d97706" />
               </div>
             </div>
           </Card>
@@ -161,20 +174,29 @@ export default function DashboardPage() {
           <Card className="p-5">
             <div className="mb-4 flex items-center justify-between">
               <div>
-                <h3 className="font-semibold tracking-tight">Awaiting Review</h3>
-                <p className="text-xs text-muted-foreground">Needs a decision</p>
+                <h3 className="font-semibold tracking-tight">Upcoming Posts</h3>
+                <p className="text-xs text-muted-foreground">Planned for the days ahead</p>
               </div>
               <Button variant="ghost" size="sm" asChild><Link href="/calendar">Open <ArrowRight className="size-3.5" /></Link></Button>
             </div>
             <div className="space-y-2">
-              {awaiting.map((p) => (
-                <Link key={p.date} href="/calendar" className="group flex items-center gap-3 rounded-xl border border-border bg-muted/20 p-2.5 transition-all hover:border-accent/40 hover:bg-card">
-                  <div className="flex size-9 items-center justify-center rounded-lg text-base" style={{ background: p.gradient }}>{p.emoji}</div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{p.reel.topic}</p>
-                    <p className="text-xs text-muted-foreground">{platformMeta[p.primaryPlatform].label} · {formatDate(p.date)}</p>
+              {upcoming.length === 0 && (
+                <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center">
+                  <p className="text-sm font-medium">Nothing planned yet</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Add your first post in Social Media Posting.</p>
+                  <Button size="sm" className="mt-3" asChild><Link href="/calendar">Plan a post</Link></Button>
+                </div>
+              )}
+              {upcoming.map(([date, blocks]) => (
+                <Link key={date} href="/calendar" className="group flex items-center gap-3 rounded-xl border border-border bg-muted/20 p-2.5 transition-all hover:border-accent/40 hover:bg-card">
+                  <div className="flex size-9 flex-col items-center justify-center rounded-lg border border-border bg-card">
+                    <span className="text-sm font-semibold leading-none">{Number(date.slice(-2))}</span>
                   </div>
-                  <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold text-white" style={{ background: contentStatusMeta[p.status].color }}>{contentStatusMeta[p.status].label}</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium">{formatDate(date, { weekday: "short" })}</p>
+                    <p className="text-xs text-muted-foreground">{blocks.length} post{blocks.length > 1 ? "s" : ""} planned</p>
+                  </div>
+                  <ArrowRight className="size-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
                 </Link>
               ))}
             </div>

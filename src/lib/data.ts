@@ -4,7 +4,8 @@
  * ------------------------------------------------------------------ */
 import { julyPlans } from "./july";
 
-export type Role = "super_admin" | "team_member" | "client";
+/** Two roles only. Finer-grained permissions are handled internally. */
+export type Role = "team" | "client";
 
 export interface User {
   id: string;
@@ -21,7 +22,7 @@ export const users: User[] = [
     id: "u_muz",
     name: "Muzammil",
     email: "muzammil.myworkspace@gmail.com",
-    role: "super_admin",
+    role: "team",
     title: "Marketing Lead",
     avatarColor: "#2456d6",
     online: true,
@@ -30,8 +31,8 @@ export const users: User[] = [
     id: "u_hash",
     name: "Hashaam",
     email: "hashaamzafar999@gmail.com",
-    role: "team_member",
-    title: "Team Member · Creative",
+    role: "team",
+    title: "Creative",
     avatarColor: "#475569",
     online: true,
   },
@@ -40,7 +41,7 @@ export const users: User[] = [
     name: "Onyema",
     email: "onyema@maincharacter.nl",
     role: "client",
-    title: "Client · Reviewer",
+    title: "Reviewer",
     avatarColor: "#16a34a",
     online: false,
   },
@@ -49,8 +50,7 @@ export const users: User[] = [
 export const currentUser: User = users[0];
 
 export const roleLabel: Record<Role, string> = {
-  super_admin: "Admin",
-  team_member: "Team Member",
+  team: "Team",
   client: "Client",
 };
 

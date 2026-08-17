@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import {
@@ -8,6 +8,7 @@ import {
   Zap, Webhook, KeyRound, FlaskConical, ListChecks, Ban, Database,
 } from "lucide-react";
 import { integrations as seed, integrationCategories, type Integration } from "@/lib/integrations";
+import { api, ApiRequestError, type MetaConnectionStatus } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,19 +21,118 @@ const statusMeta = {
   error: { label: "Error", variant: "danger" as const, dot: "#e5484d" },
 };
 
+/** The one card backed by a real OAuth flow; the rest are still Phase-2 seed data. */
+const OAUTH_KEY = "meta-graph";
+
 export default function IntegrationCenterPage() {
   const [list, setList] = useState<Integration[]>(seed);
   const [cat, setCat] = useState<(typeof integrationCategories)[number]>("All");
   const [openKey, setOpenKey] = useState<string | null>(null);
 
-  const shown = useMemo(() => (cat === "All" ? list : list.filter((i) => i.category === cat)), [list, cat]);
-  const active = list.find((i) => i.key === openKey) ?? null;
-  const connectedCount = list.filter((i) => i.status === "connected").length;
+  const [meta, setMeta] = useState<MetaConnectionStatus | null>(null);
+  const [metaBusy, setMetaBusy] = useState(false);
+  const [metaReload, setMetaReload] = useState(0);
+
+  /* Real connection state for the Meta card. */
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const status = await api.integrations.metaStatus().catch(() => null);
+      if (!cancelled) setMeta(status);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [metaReload]);
+
+  /* We land back here from Meta with the outcome in the query string. */
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("integration") !== "instagram") return;
+
+    const status = params.get("status");
+    const message = params.get("message");
+    const account = params.get("account");
+
+    // Deferred so the effect body stays free of synchronous state updates.
+    const timer = setTimeout(() => {
+      if (status === "connected") {
+        toast.success("Instagram connected", {
+          description: account ? `Connected as @${account}` : undefined,
+        });
+      } else {
+        toast.error("Couldn't connect Instagram", { description: message ?? "Please try again." });
+      }
+      setMetaReload((n) => n + 1);
+    }, 0);
+
+    // Drop the params so a refresh doesn't replay the toast.
+    window.history.replaceState({}, "", window.location.pathname);
+    return () => clearTimeout(timer);
+  }, []);
+
+  /** Overlays live OAuth state onto the seed card. */
+  const withLiveStatus = useMemo(
+    () =>
+      list.map((i) =>
+        i.key === OAUTH_KEY && meta
+          ? {
+              ...i,
+              status: (meta.connected ? "connected" : "not_connected") as Integration["status"],
+              health: (meta.connected ? "healthy" : "—") as Integration["health"],
+              lastSync: meta.account ? new Date(meta.account.connectedAt).toLocaleString() : "Never",
+              oauthStatus: meta.message,
+            }
+          : i
+      ),
+    [list, meta]
+  );
+
+  const shown = useMemo(
+    () => (cat === "All" ? withLiveStatus : withLiveStatus.filter((i) => i.category === cat)),
+    [withLiveStatus, cat]
+  );
+  const active = withLiveStatus.find((i) => i.key === openKey) ?? null;
+  const connectedCount = withLiveStatus.filter((i) => i.status === "connected").length;
 
   function setStatus(key: string, status: Integration["status"]) {
     setList((prev) => prev.map((i) => (i.key === key ? { ...i, status, lastSync: status === "connected" ? "just now" : "Never", health: status === "connected" ? "healthy" : "—" } : i)));
     if (status === "connected") toast.success("Connected", { description: "Phase 2 OAuth flow would run here." });
     else toast("Disconnected");
+  }
+
+  /** Sends the browser to Meta. The code never touches the frontend. */
+  async function connectMeta() {
+    setMetaBusy(true);
+    try {
+      const res = await api.integrations.authUrl(OAUTH_KEY);
+      if (res.url) {
+        // assign() rather than `location.href =` so the compiler doesn't read
+        // this as mutating a value from outside the component.
+        window.location.assign(res.url);
+        return; // navigating away — leave the button busy
+      }
+      toast.error("Couldn't start the connection", { description: res.message ?? "No authorization URL returned." });
+    } catch (err) {
+      toast.error("Couldn't start the connection", {
+        description: err instanceof ApiRequestError ? err.message : "Could not reach the API.",
+      });
+    }
+    setMetaBusy(false);
+  }
+
+  async function disconnectMeta() {
+    setMetaBusy(true);
+    try {
+      setMeta(await api.integrations.metaDisconnect());
+      toast("Instagram disconnected");
+    } catch (err) {
+      toast.error("Couldn't disconnect", {
+        description: err instanceof ApiRequestError ? err.message : "Could not reach the API.",
+      });
+    } finally {
+      setMetaBusy(false);
+    }
   }
 
   return (
@@ -77,9 +177,21 @@ export default function IntegrationCenterPage() {
                 </div>
                 <div className="mt-4 flex gap-2">
                   {i.status === "connected" ? (
-                    <Button variant="secondary" size="sm" className="flex-1" onClick={() => setStatus(i.key, "not_connected")}>Disconnect</Button>
+                    <Button
+                      variant="secondary" size="sm" className="flex-1"
+                      disabled={i.key === OAUTH_KEY && metaBusy}
+                      onClick={() => (i.key === OAUTH_KEY ? void disconnectMeta() : setStatus(i.key, "not_connected"))}
+                    >
+                      Disconnect
+                    </Button>
                   ) : (
-                    <Button size="sm" className="flex-1" onClick={() => setStatus(i.key, "connected")}>Connect</Button>
+                    <Button
+                      size="sm" className="flex-1"
+                      disabled={i.key === OAUTH_KEY && metaBusy}
+                      onClick={() => (i.key === OAUTH_KEY ? void connectMeta() : setStatus(i.key, "connected"))}
+                    >
+                      {i.key === OAUTH_KEY ? (metaBusy ? "Connecting…" : "Connect Instagram") : "Connect"}
+                    </Button>
                   )}
                   <Button variant="outline" size="sm" onClick={() => setOpenKey(i.key)}>Details <ArrowRight className="size-3.5" /></Button>
                 </div>
@@ -159,11 +271,27 @@ export default function IntegrationCenterPage() {
             <div className="flex flex-wrap gap-2 border-t border-border p-4">
               {active.status === "connected" ? (
                 <>
-                  <Button variant="secondary" className="flex-1" onClick={() => toast("Reconnecting…", { description: `${active.name} — Phase 2 OAuth flow.` })}><RefreshCw className="size-4" /> Reconnect</Button>
-                  <Button variant="outline" onClick={() => setStatus(active.key, "not_connected")}>Disconnect</Button>
+                  <Button
+                    variant="secondary" className="flex-1" disabled={active.key === OAUTH_KEY && metaBusy}
+                    onClick={() => (active.key === OAUTH_KEY ? void connectMeta() : toast("Reconnecting…", { description: `${active.name} — Phase 2 OAuth flow.` }))}
+                  >
+                    <RefreshCw className="size-4" /> Reconnect
+                  </Button>
+                  <Button
+                    variant="outline" disabled={active.key === OAUTH_KEY && metaBusy}
+                    onClick={() => (active.key === OAUTH_KEY ? void disconnectMeta() : setStatus(active.key, "not_connected"))}
+                  >
+                    Disconnect
+                  </Button>
                 </>
               ) : (
-                <Button className="flex-1" onClick={() => setStatus(active.key, "connected")}><Plug className="size-4" /> Connect</Button>
+                <Button
+                  className="flex-1" disabled={active.key === OAUTH_KEY && metaBusy}
+                  onClick={() => (active.key === OAUTH_KEY ? void connectMeta() : setStatus(active.key, "connected"))}
+                >
+                  <Plug className="size-4" />
+                  {active.key === OAUTH_KEY ? (metaBusy ? "Connecting…" : "Connect Instagram") : "Connect"}
+                </Button>
               )}
               <Button variant="outline" onClick={() => toast("Docs", { description: active.docsUrl })}><ExternalLink className="size-4" /> Docs</Button>
             </div>

@@ -20,7 +20,7 @@ const highlights = [
 
 export default function LoginPage() {
   const router = useRouter();
-  const setViewAs = useUI((s) => s.setViewAs);
+  const signIn = useUI((s) => s.signIn);
   const [email, setEmail] = useState(users[0].email);
   const [password, setPassword] = useState("maincharacter");
   const [show, setShow] = useState(false);
@@ -34,9 +34,10 @@ export default function LoginPage() {
     }
     setError("");
     setLoading(true);
-    if (role) setViewAs(role);
-    const dest = role === "client" ? "/calendar" : "/dashboard";
-    setTimeout(() => router.push(dest), 800);
+    const resolved: Role = role ?? users.find((u) => u.email === email)?.role ?? "team";
+    signIn(resolved);
+    const dest = resolved === "client" ? "/calendar" : "/dashboard";
+    setTimeout(() => router.push(dest), 700);
   }
 
   function pickProfile(u: User) {
@@ -228,9 +229,7 @@ export default function LoginPage() {
 }
 
 function roleTone(role: Role) {
-  if (role === "super_admin") return "bg-accent/15 text-accent";
-  if (role === "team_member") return "bg-info/15 text-info";
-  return "bg-success/15 text-success";
+  return role === "team" ? "bg-accent/15 text-accent" : "bg-success/15 text-success";
 }
 
 function GoogleIcon() {

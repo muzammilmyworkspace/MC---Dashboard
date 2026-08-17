@@ -1,0 +1,398 @@
+/* ------------------------------------------------------------------ *
+ *  MC Nexus — typed API client (Phase 2)
+ *
+ *  Talks to the Express API in `server/`. The access token lives in memory
+ *  only; the refresh token is an httpOnly cookie the browser sends
+ *  automatically. A 401 triggers one silent refresh + retry.
+ *
+ *  Usage:
+ *    await api.auth.login(email, password)
+ *    const { plans } = await api.dayPlans.list("2026-07")
+ * ------------------------------------------------------------------ */
+
+export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+
+export type Role = "TEAM" | "CLIENT";
+
+export interface ApiUser {
+  id: string;
+  email: string;
+  name: string;
+  role: Role;
+  title: string | null;
+  avatarColor: string;
+}
+
+export interface ApiError {
+  code: string;
+  message: string;
+  details?: unknown;
+}
+
+export class ApiRequestError extends Error {
+  status: number;
+  code: string;
+  details?: unknown;
+  constructor(status: number, err: ApiError) {
+    super(err.message);
+    this.status = status;
+    this.code = err.code;
+    this.details = err.details;
+  }
+}
+
+/* --------------------------- token management --------------------------- */
+
+let accessToken: string | null = null;
+const listeners = new Set<(t: string | null) => void>();
+
+export function setAccessToken(token: string | null) {
+  accessToken = token;
+  listeners.forEach((l) => l(token));
+}
+export function getAccessToken() {
+  return accessToken;
+}
+export function onAccessTokenChange(fn: (t: string | null) => void) {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
+}
+
+/* ------------------------------ core fetch ------------------------------ */
+
+async function raw<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
+  const headers = new Headers(init.headers);
+  if (!headers.has("Content-Type") && init.body) headers.set("Content-Type", "application/json");
+  if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
+
+  const res = await fetch(`${API_URL}${path}`, { ...init, headers, credentials: "include" });
+
+  // Access token expired → refresh once, then replay the request.
+  if (res.status === 401 && retry && path !== "/api/auth/refresh") {
+    const refreshed = await tryRefresh();
+    if (refreshed) return raw<T>(path, init, false);
+  }
+
+  if (res.status === 204) return undefined as T;
+
+  const payload = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new ApiRequestError(res.status, payload?.error ?? { code: "UNKNOWN", message: res.statusText });
+  }
+  return payload as T;
+}
+
+async function tryRefresh(): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_URL}/api/auth/refresh`, { method: "POST", credentials: "include" });
+    if (!res.ok) {
+      setAccessToken(null);
+      return false;
+    }
+    const data = (await res.json()) as { accessToken: string };
+    setAccessToken(data.accessToken);
+    return true;
+  } catch {
+    setAccessToken(null);
+    return false;
+  }
+}
+
+const get = <T>(p: string) => raw<T>(p);
+const post = <T>(p: string, body?: unknown) => raw<T>(p, { method: "POST", body: body ? JSON.stringify(body) : undefined });
+const patch = <T>(p: string, body?: unknown) => raw<T>(p, { method: "PATCH", body: body ? JSON.stringify(body) : undefined });
+
+/* ------------------------------ endpoints ------------------------------- */
+
+export interface ApiDayPlan {
+  id: string;
+  date: string;
+  goal: string;
+  purpose: string;
+  primaryPlatform: string;
+  time: string;
+  status: string;
+  gradient: string;
+  emoji: string;
+  cta: string;
+  captionNl: string;
+  hashtags: string[];
+  storyIdeas: string[];
+  captions: Record<string, string>;
+  reel: {
+    topic: string; hook: string; script: string; bRoll: string[];
+    closingCta: string; thumbnailConcept: string; editorNotes: string;
+  } | null;
+  post: {
+    type: string; topic: string; imageConcept: string; photographyDirection: string;
+    graphicText: string; designerNotes: string; slides?: number;
+  } | null;
+  reviews: { id: string; author: string; authorId: string; avatarColor: string; status: string; comment: string; at: string }[];
+}
+
+/* ------------------------------- Instagram ------------------------------ */
+
+export interface IgFollowerDay {
+  date: string;
+  /** Null before daily snapshotting began — those days are reconstructed from insights only. */
+  followers: number | null;
+  /** Change in total followers vs the previous day. */
+  net: number | null;
+  /** Gross new follows, reported by Meta. */
+  gained: number | null;
+  /** Derived (gained − net) — Meta never reports unfollows directly. */
+  lost: number | null;
+  reach: number | null;
+  views: number | null;
+  profileViews: number | null;
+}
+
+export interface IgTotals {
+  gained: number;
+  lost: number;
+  net: number;
+  reach: number;
+  profileViews: number;
+  /** How many days in the window actually have gained/lost figures. */
+  daysCovered: number;
+}
+
+export interface IgOverview {
+  configured: boolean;
+  message?: string;
+  latest: IgFollowerDay | null;
+  totals: IgTotals | null;
+  history: IgFollowerDay[];
+  lastSyncAt?: string | null;
+  health?: string;
+}
+
+export interface IgMediaItem {
+  id: string;
+  caption: string;
+  mediaType: string;
+  productType: string;
+  mediaUrl: string | null;
+  thumbnailUrl: string | null;
+  permalink: string;
+  timestamp: string;
+  likeCount: number;
+  commentsCount: number;
+  reach: number | null;
+  views: number | null;
+  saved: number | null;
+  shares: number | null;
+  totalInteractions: number | null;
+  avgWatchTimeMs: number | null;
+  engagementRate: number | null;
+}
+
+/** Meta OAuth connection state. Deliberately carries no token material. */
+export interface MetaConnectionStatus {
+  /** Server env vars present and valid. */
+  configured: boolean;
+  /** A user has completed the OAuth flow. */
+  connected: boolean;
+  /** Human-readable, safe to render directly. */
+  message: string;
+  account: {
+    igAccountId: string;
+    igUsername: string;
+    pageId: string;
+    pageName: string;
+    connectedAt: string;
+    tokenExpiresAt: string | null;
+  } | null;
+  missing: string[];
+}
+
+/** Which features the granted Meta permissions actually unlock. */
+export interface MetaCapability {
+  feature: string;
+  requires: string[];
+  granted: boolean;
+  missing: string[];
+  appReview: boolean;
+  note?: string;
+}
+
+export interface MetaMessagingReadiness {
+  available: boolean;
+  reason: string;
+  missing: string[];
+  webhookConfigured: boolean;
+}
+
+export interface MetaProfileResponse {
+  profile: {
+    id: string;
+    username: string;
+    name: string | null;
+    biography: string | null;
+    website: string | null;
+    profilePictureUrl: string | null;
+    followersCount: number;
+    followsCount: number;
+    mediaCount: number;
+  };
+  page: { id: string; name: string } | null;
+  connectedAt: string | null;
+}
+
+export interface MetaMediaItem {
+  id: string;
+  caption: string;
+  mediaType: string;
+  productType: string;
+  mediaUrl: string | null;
+  thumbnailUrl: string | null;
+  permalink: string;
+  timestamp: string;
+  likeCount: number;
+  commentsCount: number;
+  reach: number | null;
+  views: number | null;
+  saved: number | null;
+  shares: number | null;
+  totalInteractions: number | null;
+}
+
+export interface MetaInsightsResponse {
+  days: number;
+  series: { date: string; reach: number | null; newFollowers: number | null }[];
+  today: { views?: number; profileViews?: number; accountsEngaged?: number; totalInteractions?: number };
+  /** False when Meta returned nothing — render a message, not zeros. */
+  available: boolean;
+}
+
+export interface MetaComment {
+  id: string;
+  text: string;
+  username: string;
+  timestamp: string;
+  likeCount: number;
+  hidden: boolean;
+  replies: { id: string; text: string; username: string; timestamp: string }[];
+}
+
+export interface MetaMessagesResponse extends MetaMessagingReadiness {
+  conversations: unknown[];
+  setupRequired: boolean;
+}
+
+export interface IgDiagnostics {
+  configured: boolean;
+  missing: string[];
+  token: {
+    valid: boolean;
+    neverExpires?: boolean;
+    expiresAt?: string | null;
+    scopes?: string[];
+    message: string;
+  } | null;
+  accounts: { pageId: string; pageName: string; igAccountId: string | null; igUsername: string | null }[];
+  accountsError?: string | null;
+  configuredAccountId?: string;
+}
+
+export const api = {
+  health: () => get<{ status: string; db: "up" | "down"; uptime: number }>("/health"),
+
+  auth: {
+    async login(email: string, password: string) {
+      const data = await post<{ user: ApiUser; accessToken: string }>("/api/auth/login", { email, password });
+      setAccessToken(data.accessToken);
+      return data.user;
+    },
+    async refresh() {
+      const ok = await tryRefresh();
+      return ok ? (await get<{ user: ApiUser }>("/api/auth/me")).user : null;
+    },
+    async logout() {
+      await post("/api/auth/logout").catch(() => undefined);
+      setAccessToken(null);
+    },
+    me: () => get<{ user: ApiUser }>("/api/auth/me").then((r) => r.user),
+  },
+
+  dayPlans: {
+    list: (month: string) => get<{ month: string; plans: ApiDayPlan[] }>(`/api/day-plans?month=${month}`),
+    get: (date: string) => get<{ plan: ApiDayPlan }>(`/api/day-plans/${date}`),
+    update: (
+      date: string,
+      body: Partial<{
+        hook: string; cta: string; hashtags: string[]; postingTime: string;
+        status: string; captionNl: string; captions: Record<string, string>;
+      }>
+    ) => patch<{ plan: ApiDayPlan }>(`/api/day-plans/${date}`, body),
+    review: (date: string, status: "APPROVED" | "REJECTED" | "CHANGES" | "COMMENT", comment = "") =>
+      post<{ plan: ApiDayPlan }>(`/api/day-plans/${date}/reviews`, { status, comment }),
+  },
+
+  integrations: {
+    list: () => get<{ integrations: Array<{ key: string; name: string; category: string; status: string; health: string; lastSyncAt: string | null; configured: boolean; missingEnv: string[]; scopes: string[]; docsUrl: string }> }>("/api/integrations"),
+    authUrl: (key: string) => get<{ url?: string; state?: string; apiKeyOnly?: boolean; message?: string }>(`/api/integrations/${key}/auth-url`),
+    test: (key: string) => post<{ ok: boolean; message: string; checkedAt: string }>(`/api/integrations/${key}/test`),
+    connect: (key: string) => post<{ key: string; status: string }>(`/api/integrations/${key}/connect`),
+    disconnect: (key: string) => post<{ key: string; status: string }>(`/api/integrations/${key}/disconnect`),
+    syncRuns: (key: string) => get<{ runs: unknown[] }>(`/api/integrations/${key}/sync-runs`),
+
+    /* --- Meta OAuth connection ------------------------------------------ */
+    metaStatus: () => get<MetaConnectionStatus>("/api/integrations/meta-graph/status"),
+    metaDisconnect: () => post<MetaConnectionStatus>("/api/integrations/meta-graph/disconnect"),
+    metaCapabilities: () =>
+      get<{ capabilities: MetaCapability[]; messaging: MetaMessagingReadiness }>(
+        "/api/integrations/meta-graph/capabilities"
+      ),
+
+    /* --- Instagram data over the OAuth connection ------------------------ */
+    metaProfile: () => get<MetaProfileResponse>("/api/integrations/meta-graph/profile"),
+    metaMedia: (limit = 12, insights = true) =>
+      get<{ media: MetaMediaItem[] }>(`/api/integrations/meta-graph/media?limit=${limit}&insights=${insights}`),
+    metaInsights: (days = 28) => get<MetaInsightsResponse>(`/api/integrations/meta-graph/insights?days=${days}`),
+    metaComments: (mediaId: string, limit = 25) =>
+      get<{ comments: MetaComment[] }>(
+        `/api/integrations/meta-graph/comments?mediaId=${encodeURIComponent(mediaId)}&limit=${limit}`
+      ),
+    metaReplyComment: (commentId: string, message: string) =>
+      post<{ id: string }>("/api/integrations/meta-graph/comments/reply", { commentId, message }),
+    metaHideComment: (commentId: string, hide: boolean) =>
+      post<{ ok: boolean; hidden: boolean }>("/api/integrations/meta-graph/comments/hide", { commentId, hide }),
+    metaMessages: () => get<MetaMessagesResponse>("/api/integrations/meta-graph/messages"),
+  },
+
+  instagram: {
+    overview: (days = 30) => get<IgOverview>(`/api/instagram/overview?days=${days}`),
+    followers: (days = 30) => get<{ history: IgFollowerDay[] }>(`/api/instagram/followers?days=${days}`),
+    media: (limit = 24, type: "ALL" | "FEED" | "REELS" | "STORY" = "ALL") =>
+      get<{ media: IgMediaItem[] }>(`/api/instagram/media?limit=${limit}&type=${type}`),
+    demographics: (breakdown: "age" | "city" | "country" | "gender" = "country") =>
+      get<{ breakdown: string; data: Record<string, number>; note: string | null }>(
+        `/api/instagram/demographics?breakdown=${breakdown}`
+      ),
+    sync: () =>
+      post<{ ok: boolean; followers?: number; mediaSynced?: number; daysBackfilled?: number; error?: string }>(
+        "/api/instagram/sync"
+      ),
+    diagnostics: () => get<IgDiagnostics>("/api/instagram/diagnostics"),
+  },
+
+  dashboard: {
+    overview: () =>
+      get<{
+        content: { total: number; counts: Record<string, number>; awaiting: number; completion: number };
+        integrations: { total: number; connected: number; items: unknown[] };
+        recentReviews: unknown[];
+        upcoming: { date: string; topic: string; status: string }[];
+      }>("/api/dashboard/overview"),
+  },
+
+  notifications: {
+    list: () => get<{ notifications: unknown[]; unread: number }>("/api/notifications"),
+    readAll: () => patch("/api/notifications/read-all"),
+  },
+
+  users: {
+    list: () => get<{ users: ApiUser[] }>("/api/users"),
+  },
+};

@@ -1,0 +1,10 @@
+{
+  // Type-checks the test files too. The build config excludes them so they
+  // never land in dist/; this one exists purely for `npm run test:types`.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

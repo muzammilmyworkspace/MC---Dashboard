@@ -21,7 +21,8 @@ import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } 
 import { CSS } from "@dnd-kit/utilities";
 import { Search, PanelLeftClose, PanelLeftOpen, GripVertical, PackageOpen, ChevronDown, X } from "lucide-react";
 import {
-  pinnedItems,
+  pinnedForRole,
+  sectionActions,
   sectionMeta,
   sectionsForRole,
   itemFor,
@@ -30,6 +31,7 @@ import {
   type SidebarSections,
 } from "@/lib/nav";
 import { useUI } from "@/lib/store";
+import { useTasks, priorityMeta } from "@/lib/tasks";
 import { Logo, LogoMark } from "@/components/brand/logo";
 import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -90,6 +92,7 @@ function SidebarBody({ collapsed, onNavigate }: { collapsed: boolean; onNavigate
   const { setCommandOpen, viewAs, expanded, toggleSection } = useUI();
   const [sections, setSections] = useState<SidebarSections>(() => useUI.getState().sections);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const tasks = useTasks((s) => s.tasks);
   const visibleKeys = sectionsForRole(viewAs);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
@@ -157,9 +160,9 @@ function SidebarBody({ collapsed, onNavigate }: { collapsed: boolean; onNavigate
         )}
       </div>
 
-      {/* Pinned Dashboard — fixed, never scrolls away */}
-      <div className="px-3 pt-3">
-        {pinnedItems.map((item) => (
+      {/* Pinned — fixed, never scrolls away */}
+      <div className="space-y-1 px-3 pt-3">
+        {pinnedForRole(viewAs).map((item) => (
           <StaticRow key={item.href} item={item} active={pathname === item.href} collapsed={collapsed} onNavigate={onNavigate} />
         ))}
       </div>
@@ -178,14 +181,49 @@ function SidebarBody({ collapsed, onNavigate }: { collapsed: boolean; onNavigate
             {visibleKeys.map((key) => {
               const meta = sectionMeta.find((s) => s.key === key)!;
               const open = !!activeId || expanded[key];
+              const action = sectionActions[key];
+              const sectionTasks = tasks.filter((t) => t.section === key);
               return (
-                <DroppableSection key={key} id={key} title={meta.title} count={sections[key].length} open={open} onToggle={() => toggleSection(key)}>
+                <DroppableSection
+                  key={key}
+                  id={key}
+                  title={meta.title}
+                  count={sections[key].length + sectionTasks.length}
+                  open={open}
+                  onToggle={() => toggleSection(key)}
+                >
+                  {action && (
+                    <Link
+                      href={action.href}
+                      onClick={onNavigate}
+                      className={cn(
+                        "mb-1 flex h-9 items-center gap-2.5 rounded-lg border border-dashed border-sidebar-border px-3 text-sm font-medium transition-colors",
+                        pathname === action.href ? "border-accent/40 bg-sidebar-active text-white" : "text-sidebar-muted hover:border-accent/40 hover:text-white"
+                      )}
+                    >
+                      <action.icon className="size-[16px]" /> {action.label}
+                    </Link>
+                  )}
+
                   <SortableContext items={sections[key]} strategy={verticalListSortingStrategy}>
                     {sections[key].map((href) => (
                       <SortableRow key={href} href={href} active={pathname === href} dragging={activeId === href} onNavigate={onNavigate} />
                     ))}
                   </SortableContext>
-                  {sections[key].length === 0 && (
+
+                  {sectionTasks.map((t) => (
+                    <Link
+                      key={t.id}
+                      href={`/add-task?id=${t.id}`}
+                      onClick={onNavigate}
+                      className="group flex h-9 items-center gap-2.5 rounded-lg px-3 text-sm text-sidebar-muted transition-colors hover:bg-white/[0.05] hover:text-white"
+                    >
+                      <span className="size-1.5 shrink-0 rounded-full" style={{ background: priorityMeta[t.priority].color }} />
+                      <span className="flex-1 truncate">{t.title}</span>
+                    </Link>
+                  ))}
+
+                  {sections[key].length === 0 && sectionTasks.length === 0 && (
                     <div className="flex flex-col items-center gap-1.5 rounded-xl border border-dashed border-sidebar-border/80 px-3 py-6 text-center">
                       <PackageOpen className="size-5 text-sidebar-muted/70" />
                       <p className="text-xs text-sidebar-muted">Drop tasks here for future planning.</p>
