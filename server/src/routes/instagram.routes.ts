@@ -146,18 +146,26 @@ instagramRouter.post("/sync", requireRole("TEAM"), async (req, res, next) => {
  */
 instagramRouter.get("/diagnostics", requireRole("TEAM"), async (_req, res, next) => {
   try {
-    if (!isConfigured()) {
+    // Only the token is required. This endpoint exists to FIND
+    // IG_BUSINESS_ACCOUNT_ID, so demanding it up front would be circular —
+    // you could never get past the very state it's meant to diagnose.
+    if (!env.META_ACCESS_TOKEN) {
       return res.json({
         configured: false,
-        missing: [
-          ...(env.META_ACCESS_TOKEN ? [] : ["META_ACCESS_TOKEN"]),
-          ...(env.IG_BUSINESS_ACCOUNT_ID ? [] : ["IG_BUSINESS_ACCOUNT_ID"]),
-        ],
-        token: null, accounts: [],
+        missing: ["META_ACCESS_TOKEN"],
+        token: null,
+        accounts: [],
       });
     }
 
-    const [token, accounts] = await Promise.allSettled([debugToken(), discoverAccounts()]);
+    // Account discovery walks /me/accounts and never touches the IG id.
+    const probe = {
+      token: env.META_ACCESS_TOKEN,
+      igAccountId: env.IG_BUSINESS_ACCOUNT_ID ?? "",
+      version: env.META_GRAPH_VERSION,
+    };
+
+    const [token, accounts] = await Promise.allSettled([debugToken(probe), discoverAccounts()]);
     res.json({
       configured: true,
       missing: [],

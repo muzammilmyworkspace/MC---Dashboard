@@ -32,6 +32,7 @@ export function InstagramOAuthPanel() {
   const [caps, setCaps] = useState<MetaCapability[]>([]);
   const [loading, setLoading] = useState(true);
   const [apiError, setApiError] = useState<string | null>(null);
+  const [needsLogin, setNeedsLogin] = useState(false);
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<Tab>("content");
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -86,11 +87,15 @@ export function InstagramOAuthPanel() {
         setStatus(s);
         setApiError(null);
       } catch (err) {
-        // An unreachable API is not the same as an unconfigured integration,
-        // and reporting it as "not configured" sends you hunting through
-        // .env when the real answer is that the server isn't running.
         if (cancelled) return;
-        setApiError(errText(err));
+        // Three different failures used to render as one message. A 401 means
+        // "sign in", an unreachable host means "start the server", and neither
+        // is "not configured" — telling you the wrong one costs real time.
+        if (err instanceof ApiRequestError && err.status === 401) {
+          setNeedsLogin(true);
+        } else {
+          setApiError(errText(err));
+        }
         setStatus(null);
       } finally {
         if (!cancelled) setLoading(false);
@@ -133,6 +138,23 @@ export function InstagramOAuthPanel() {
 
   if (loading) {
     return <Card className="h-40 animate-pulse bg-muted/40" />;
+  }
+
+  /* ----------------------------- Not signed in -------------------------- */
+  if (needsLogin) {
+    return (
+      <SectionCard title="Instagram via Meta login" icon={Plug} description="OAuth connection">
+        <EmptyState
+          icon={ShieldAlert}
+          title="Sign in to MC Nexus first"
+          description="The API rejected the request as unauthenticated. Log in, then come back to this page — the backend is running fine."
+          className="border-0 bg-transparent py-8"
+          action={
+            <Button onClick={() => window.location.assign("/login")}>Go to login</Button>
+          }
+        />
+      </SectionCard>
+    );
   }
 
   /* --------------------------- API unreachable -------------------------- */

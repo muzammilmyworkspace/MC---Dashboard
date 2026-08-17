@@ -18,7 +18,7 @@ and immediately understandable for non-technical users.
 
 ```bash
 npm install
-npm run dev      # http://localhost:3001
+npm run dev      # http://localhost:3002
 npm run build    # production build
 npm run lint     # eslint
 ```
@@ -26,7 +26,7 @@ npm run lint     # eslint
 > Note: don't run `next build` and `next dev` against the same `.next` folder back-to-back —
 > Turbopack shares that cache and it can corrupt. If dev starts 500ing, `rm -rf .next` and restart.
 
-Open **http://localhost:3001** → splash → login. Pick a **demo profile** to sign in:
+Open **http://localhost:3002** → splash → login. Pick a **demo profile** to sign in:
 
 | Profile | Role | Lands on |
 |---------|------|----------|

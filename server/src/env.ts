@@ -11,10 +11,10 @@ const schema = z.object({
   ACCESS_TOKEN_TTL: z.string().default("15m"),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().default(30),
 
-  // 3001, not 3000: another app owns 3000 on the dev machine. The OAuth
-  // callback redirects to this origin, so a stale value would hand the
+  // 3002: 3000 and 3001 are taken by other apps on this dev machine. The
+  // OAuth callback redirects to this origin, so a stale value would hand the
   // connection result to whatever else is listening.
-  CORS_ORIGIN: z.string().default("http://localhost:3001"),
+  CORS_ORIGIN: z.string().default("http://localhost:3002"),
   COOKIE_DOMAIN: z.string().optional(),
 
   // Credential encryption (64 hex chars). Falls back to a derived key in dev.
