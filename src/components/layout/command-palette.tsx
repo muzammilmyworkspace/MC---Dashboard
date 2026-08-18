@@ -15,7 +15,8 @@ import {
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useUI } from "@/lib/store";
-import { allNavItems, phase2Hrefs } from "@/lib/nav";
+import { allNavItems } from "@/lib/nav";
+import { moduleFor } from "@/lib/modules-registry";
 import { cn } from "@/lib/utils";
 
 export function CommandPalette() {
@@ -114,8 +115,12 @@ export function CommandPalette() {
                         <item.icon className="size-4 text-muted-foreground" />
                       </span>
                       <span className="flex-1">{item.label}</span>
-                      {phase2Hrefs.includes(item.href) && (
-                        <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] uppercase text-muted-foreground/70">soon</span>
+                      {/* Marks modules that aren't built yet, so the palette
+                          doesn't imply every destination is functional. */}
+                      {moduleFor(item.href)?.live === false && (
+                        <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-muted-foreground/70">
+                          soon
+                        </span>
                       )}
                       <ArrowRight className={cn("size-3.5 text-muted-foreground opacity-0 group-data-[selected=true]:opacity-100")} />
                     </Command.Item>

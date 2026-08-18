@@ -1,5 +1,5 @@
-import { ConnectionPage } from "@/components/integrations/connection-page";
+import { ModulePage } from "@/components/modules/module-page";
 
 export default function Page() {
-  return <ConnectionPage connectionKey="youtube" />;
+  return <ModulePage href="/youtube" />;
 }

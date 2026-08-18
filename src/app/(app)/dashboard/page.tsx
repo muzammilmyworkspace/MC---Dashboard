@@ -1,295 +1,312 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { motion } from "framer-motion";
+import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
-  BadgeCheck, CheckCircle2, Eye, ArrowUpRight, ArrowDownRight, ArrowRight,
-  Sparkles, Gauge, Globe, ServerCog, Mail,
+  ArrowRight, ArrowUpRight, ArrowDownRight, Plug, Activity,
+  AlertTriangle, RefreshCw, Users, Eye, Clock,
 } from "lucide-react";
+import { platformModules } from "@/lib/modules-registry";
+import { usePlatformStatus } from "@/lib/platform-status";
+import { api, type IgOverview } from "@/lib/api";
 import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Avatar } from "@/components/ui/avatar";
-import { Progress } from "@/components/ui/progress";
-import { AnimatedCounter } from "@/components/ui/animated-counter";
-import { PerformanceChart } from "@/components/charts/charts";
-import {
-  activity, platformWidgets, apiConnections,
-  userById, users, currentUser,
-  type PlatformWidget, type ApiConnection,
-} from "@/lib/data";
-import { usePosting } from "@/lib/posting";
-import { useUI } from "@/lib/store";
-import { relativeTime, formatDate, cn } from "@/lib/utils";
-
-const container = { hidden: {}, show: { transition: { staggerChildren: 0.05 } } };
-const item = { hidden: { opacity: 0, y: 16 }, show: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.22, 1, 0.36, 1] as const } } };
+import { StatusDot } from "@/components/ui/status-dot";
+import { cn, relativeTime } from "@/lib/utils";
 
 export default function DashboardPage() {
-  const { viewAs } = useUI();
-  const me = users.find((u) => u.role === viewAs) ?? currentUser;
+  const { statusFor, reachable, loading } = usePlatformStatus();
+  const [ig, setIg] = useState<IgOverview | null>(null);
+  const [igLoading, setIgLoading] = useState(true);
 
-  // Content stats come from what the team has actually planned.
-  const days = usePosting((s) => s.days);
-  const now = new Date();
-  const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  /* The one platform with live data. Everything shown below is measured. */
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const data = await api.instagram.overview(30).catch(() => null);
+      if (cancelled) return;
+      setIg(data);
+      setIgLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  const monthEntries = Object.entries(days).filter(([date, blocks]) => date.startsWith(monthPrefix) && blocks.length > 0);
-  const total = monthEntries.reduce((n, [, blocks]) => n + blocks.length, 0);
-  const daysCovered = monthEntries.length;
-  const withMedia = monthEntries.reduce(
-    (n, [, blocks]) => n + blocks.filter((b) => b.postMedia.length > 0 || b.reelMedia).length,
-    0
-  );
-  const withCopy = monthEntries.reduce(
-    (n, [, blocks]) => n + blocks.filter((b) => Object.values(b.content).some((c) => c.caption.trim())).length,
-    0
-  );
-  const completion = Math.round((daysCovered / daysInMonth) * 100);
-
-  const upcoming = monthEntries
-    .filter(([date]) => date >= `${monthPrefix}-${String(now.getDate()).padStart(2, "0")}`)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .slice(0, 5);
-  const connected = apiConnections.filter((a) => a.connected).length;
-
-  const kpiCards = [
-    { label: "Business Health", value: 94, suffix: "%", delta: 3, icon: Gauge, tone: "#2456d6" },
-    { label: "Month Planned", value: completion, suffix: "%", delta: 8, icon: CheckCircle2, tone: "#16a34a" },
-    { label: "Posts Planned", value: total, suffix: "", delta: 0, icon: BadgeCheck, tone: "#d97706" },
-    { label: "Reach (30d)", value: 312000, suffix: "", delta: 18, icon: Eye, tone: "#2456d6", compact: true },
-  ];
-
-  const health = [
-    { label: "Campaign Health", score: 88, icon: Gauge, note: "4 active · ROAS 4.2x" },
-    { label: "Website Health", score: 96, icon: Globe, note: "LCP 1.8s · 99.9% uptime" },
-    { label: "System Health", score: 99, icon: ServerCog, note: "All services operational" },
-    { label: "Workspace", score: 100, icon: Mail, note: "12 users · 78% storage" },
-  ];
+  const statuses = platformModules.map((m) => ({ mod: m, status: statusFor(m.integrationKey) }));
+  const connected = statuses.filter((s) => s.status.state === "connected");
+  const pending = statuses.filter((s) => s.status.state !== "connected");
 
   return (
-    <motion.div variants={container} initial="hidden" animate="show" className="space-y-6">
-      {/* Greeting */}
-      <motion.div variants={item}>
-        <p className="text-sm text-muted-foreground">{new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</p>
-        <h2 className="mt-1 text-[28px] font-semibold tracking-tight">Welcome back, {me.name}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">Business at a glance — every channel, campaign and approval in one calm view.</p>
-      </motion.div>
-
-      {/* Headline KPIs */}
-      <motion.div variants={item} className="grid grid-cols-2 gap-4 xl:grid-cols-4">
-        {kpiCards.map((k) => {
-          const up = k.delta >= 0;
-          return (
-            <Card key={k.label} className="relative overflow-hidden p-5 transition-shadow hover:shadow-glow">
-              <div className="flex items-start justify-between">
-                <div className="flex size-10 items-center justify-center rounded-xl" style={{ background: `${k.tone}14`, color: k.tone }}><k.icon className="size-5" /></div>
-                <span className={cn("flex items-center gap-0.5 rounded-full px-2 py-0.5 text-xs font-medium", up ? "bg-success/10 text-success" : "bg-danger/10 text-danger")}>
-                  {up ? <ArrowUpRight className="size-3" /> : <ArrowDownRight className="size-3" />}{Math.abs(k.delta)}{k.suffix === "%" ? "%" : ""}
-                </span>
-              </div>
-              <div className="mt-4 text-[28px] font-semibold tracking-tight"><AnimatedCounter value={k.value} compact={"compact" in k && k.compact} suffix={k.suffix} /></div>
-              <p className="mt-1 text-sm text-muted-foreground">{k.label}</p>
-            </Card>
-          );
-        })}
-      </motion.div>
-
-      {/* Performance + health scores + content progress */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <motion.div variants={item} className="lg:col-span-2">
-          <Card className="h-full p-5">
-            <div className="mb-4 flex items-center justify-between">
-              <div>
-                <h3 className="font-semibold tracking-tight">Marketing Performance</h3>
-                <p className="text-xs text-muted-foreground">Reach & engagement · last 7 days</p>
-              </div>
-              <div className="flex items-center gap-4 text-xs">
-                <Legend color="#2456d6" label="Reach" /><Legend color="#7aa2f0" label="Engagement" />
-              </div>
-            </div>
-            <PerformanceChart />
-          </Card>
-        </motion.div>
-
-        <motion.div variants={item}>
-          <Card className="flex h-full flex-col p-5">
-            <h3 className="font-semibold tracking-tight">Content Progress</h3>
-            <p className="text-xs text-muted-foreground">{total} pieces this month</p>
-            <div className="mt-4 flex items-center gap-4">
-              <ScoreRing value={completion} />
-              <div className="flex-1 space-y-2 text-sm">
-                <ProgressRow label="Days" value={daysCovered} total={daysInMonth} color="#2456d6" />
-                <ProgressRow label="Posts" value={total} total={Math.max(total, daysInMonth)} color="#0f172a" />
-                <ProgressRow label="Written" value={withCopy} total={Math.max(total, 1)} color="#16a34a" />
-                <ProgressRow label="Media" value={withMedia} total={Math.max(total, 1)} color="#d97706" />
-              </div>
-            </div>
-          </Card>
-        </motion.div>
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+      className="space-y-7"
+    >
+      {/* Header */}
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-[22px] font-semibold tracking-tight">Overview</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {loading
+              ? "Checking connections…"
+              : `${connected.length} of ${platformModules.length} platforms connected`}
+          </p>
+        </div>
+        {ig?.lastSyncAt && (
+          <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Clock className="size-3.5" /> Synced {relativeTime(ig.lastSyncAt)}
+          </span>
+        )}
       </div>
 
-      {/* Health score mini-cards */}
-      <motion.div variants={item} className="grid grid-cols-2 gap-4 xl:grid-cols-4">
-        {health.map((h) => (
-          <Card key={h.label} className="p-5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm font-medium"><h.icon className="size-4 text-muted-foreground" /> {h.label}</div>
-              <span className={cn("text-sm font-semibold", h.score >= 95 ? "text-success" : h.score >= 80 ? "text-accent" : "text-warning")}>{h.score}</span>
-            </div>
-            <Progress value={h.score} className="mt-3" color={h.score >= 95 ? "#16a34a" : h.score >= 80 ? "#2456d6" : "#d97706"} />
-            <p className="mt-2 text-xs text-muted-foreground">{h.note}</p>
-          </Card>
-        ))}
-      </motion.div>
+      {!reachable && (
+        <Card className="flex items-start gap-3 border-warning/30 bg-warning/[0.06] p-4">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
+          <div>
+            <p className="text-sm font-medium">Can&apos;t reach the API</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Start the backend, then reload. Connection status and metrics are unavailable.
+            </p>
+          </div>
+        </Card>
+      )}
 
-      {/* Platform snapshots */}
-      <motion.div variants={item}>
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-lg font-semibold tracking-tight">Platform Snapshots</h3>
-          <span className="text-sm text-muted-foreground">Live overview</span>
+      {/* Live platform spotlight */}
+      {igLoading ? (
+        <Card className="h-56 animate-pulse bg-muted/40" />
+      ) : ig?.configured && ig.latest ? (
+        <InstagramSpotlight data={ig} />
+      ) : null}
+
+      {/* Platforms */}
+      <section className="space-y-3">
+        <div className="flex items-end justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold">Platforms</h3>
+            <p className="text-xs text-muted-foreground">Open a platform to manage its connection and data.</p>
+          </div>
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/integrations"><Plug className="size-4" /> Integrations</Link>
+          </Button>
         </div>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {platformWidgets.map((w) => <PlatformCard key={w.key} w={w} />)}
-        </div>
-      </motion.div>
 
-      {/* Connections + awaiting + activity */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <motion.div variants={item}>
-          <Card className="p-5">
-            <div className="mb-4 flex items-center justify-between">
-              <div>
-                <h3 className="font-semibold tracking-tight">Platform Connections</h3>
-                <p className="text-xs text-muted-foreground">{connected}/{apiConnections.length} connected</p>
-              </div>
-              <Button variant="ghost" size="sm" asChild><Link href="/integrations">Manage <ArrowRight className="size-3.5" /></Link></Button>
-            </div>
-            <div className="space-y-0.5">{apiConnections.slice(0, 7).map((a) => <ConnectionRow key={a.name} a={a} />)}</div>
-          </Card>
-        </motion.div>
+        {connected.length > 0 && (
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {connected.map(({ mod, status }) => (
+              <PlatformCard key={mod.href} mod={mod} status={status} highlighted />
+            ))}
+          </div>
+        )}
 
-        <motion.div variants={item}>
-          <Card className="p-5">
-            <div className="mb-4 flex items-center justify-between">
-              <div>
-                <h3 className="font-semibold tracking-tight">Upcoming Posts</h3>
-                <p className="text-xs text-muted-foreground">Planned for the days ahead</p>
-              </div>
-              <Button variant="ghost" size="sm" asChild><Link href="/calendar">Open <ArrowRight className="size-3.5" /></Link></Button>
-            </div>
-            <div className="space-y-2">
-              {upcoming.length === 0 && (
-                <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center">
-                  <p className="text-sm font-medium">Nothing planned yet</p>
-                  <p className="mt-1 text-xs text-muted-foreground">Add your first post in Social Media Posting.</p>
-                  <Button size="sm" className="mt-3" asChild><Link href="/calendar">Plan a post</Link></Button>
-                </div>
-              )}
-              {upcoming.map(([date, blocks]) => (
-                <Link key={date} href="/calendar" className="group flex items-center gap-3 rounded-xl border border-border bg-muted/20 p-2.5 transition-all hover:border-accent/40 hover:bg-card">
-                  <div className="flex size-9 flex-col items-center justify-center rounded-lg border border-border bg-card">
-                    <span className="text-sm font-semibold leading-none">{Number(date.slice(-2))}</span>
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{formatDate(date, { weekday: "short" })}</p>
-                    <p className="text-xs text-muted-foreground">{blocks.length} post{blocks.length > 1 ? "s" : ""} planned</p>
-                  </div>
-                  <ArrowRight className="size-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
-                </Link>
+        {pending.length > 0 && (
+          <>
+            {connected.length > 0 && (
+              <p className="pt-2 text-[11px] uppercase tracking-wider text-muted-foreground">Not connected</p>
+            )}
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {pending.map(({ mod, status }) => (
+                <PlatformCard key={mod.href} mod={mod} status={status} />
               ))}
             </div>
-          </Card>
-        </motion.div>
+          </>
+        )}
+      </section>
 
-        <motion.div variants={item}>
-          <Card className="p-5">
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="font-semibold tracking-tight">Recent Activity</h3>
-              <Badge variant="secondary"><Sparkles className="size-3" /> Live</Badge>
-            </div>
-            <div className="relative space-y-4 before:absolute before:left-[15px] before:top-2 before:h-[calc(100%-1rem)] before:w-px before:bg-border">
-              {activity.slice(0, 5).map((a) => {
-                const u = userById(a.user);
-                return (
-                  <div key={a.id} className="relative flex gap-3">
-                    <div className="z-10"><Avatar name={u.name} color={u.avatarColor} size={28} /></div>
-                    <div className="flex-1 pt-0.5">
-                      <p className="text-sm leading-snug"><span className="font-medium">{u.name}</span> <span className="text-muted-foreground">{a.action}</span> <span className="font-medium">{a.target}</span></p>
-                      <p className="text-xs text-muted-foreground">{relativeTime(a.at)}</p>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </Card>
-        </motion.div>
-      </div>
+      {/* Activity */}
+      <Card className="p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold">Recent activity</h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">Syncs and connection changes.</p>
+          </div>
+        </div>
+
+        {ig?.lastSyncAt ? (
+          <ul className="mt-4 divide-y divide-border">
+            <li className="flex items-center gap-3 py-3">
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-success/10 text-success">
+                <RefreshCw className="size-4" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[13px] font-medium">Instagram synced</p>
+                <p className="text-xs text-muted-foreground">
+                  {ig.latest?.followers?.toLocaleString()} followers recorded
+                </p>
+              </div>
+              <span className="shrink-0 text-xs text-muted-foreground">{relativeTime(ig.lastSyncAt)}</span>
+            </li>
+          </ul>
+        ) : (
+          <div className="mt-4 flex flex-col items-center justify-center rounded-lg border border-dashed border-border py-10 text-center">
+            <Activity className="mb-2 size-5 text-muted-foreground/60" />
+            <p className="text-sm font-medium">No activity yet</p>
+            <p className="mt-0.5 max-w-xs text-xs text-muted-foreground">
+              Connect a platform and syncs will be recorded here.
+            </p>
+          </div>
+        )}
+      </Card>
     </motion.div>
   );
 }
 
-function PlatformCard({ w }: { w: PlatformWidget }) {
+/* ---------------------------- Instagram spotlight ------------------------- */
+
+function InstagramSpotlight({ data }: { data: IgOverview }) {
+  const followers = data.latest?.followers ?? null;
+  const net = data.totals?.net ?? 0;
+  const reach = data.totals?.reach ?? 0;
+  const profileViews = data.totals?.profileViews ?? 0;
+
+  // Reach is the dense series — 31 unbroken days, so it reads as a trend.
+  // Follower totals only exist for days we snapshotted ourselves.
+  const series = data.history
+    .filter((d) => d.reach !== null)
+    .map((d) => ({ date: d.date, reach: d.reach ?? 0 }));
+
   return (
-    <Card className="flex flex-col p-5 transition-all hover:-translate-y-0.5 hover:shadow-glow">
-      <div className="mb-4 flex items-center gap-2.5">
-        <div className="flex size-9 items-center justify-center rounded-lg text-lg" style={{ background: `${w.accent}14` }}>{w.emoji}</div>
-        <div className="flex-1">
-          <p className="text-sm font-semibold leading-tight">{w.name}</p>
-          {w.status && <p className="text-[11px] text-success">● {w.status}</p>}
-        </div>
-      </div>
-      <div className="grid flex-1 grid-cols-2 gap-x-4 gap-y-3">
-        {w.stats.map((s) => (
-          <div key={s.label}>
-            <p className="text-[11px] text-muted-foreground">{s.label}</p>
-            <p className="mt-0.5 flex items-center gap-1 text-sm font-semibold">
-              {s.value}{s.delta && <span className={cn("text-[10px] font-medium", s.delta.startsWith("-") ? "text-danger" : "text-success")}>{s.delta}</span>}
-            </p>
+    <Card className="overflow-hidden">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border p-5">
+        <div className="flex items-center gap-3">
+          <div className="flex size-10 items-center justify-center rounded-xl border border-border bg-muted/40 text-accent">
+            <Users className="size-5" />
           </div>
-        ))}
+          <div>
+            <div className="flex items-center gap-2.5">
+              <h3 className="text-sm font-semibold">Instagram</h3>
+              <StatusDot state="connected" label="Connected" />
+            </div>
+            <p className="text-xs text-muted-foreground">Last 30 days</p>
+          </div>
+        </div>
+        <Button variant="outline" size="sm" asChild>
+          <Link href="/instagram">Open <ArrowRight className="size-3.5" /></Link>
+        </Button>
       </div>
-      <Button variant="secondary" size="sm" className="mt-4 w-full" asChild><Link href={w.href}>{w.action} <ArrowUpRight className="size-3.5" /></Link></Button>
+
+      <div className="grid grid-cols-2 divide-border sm:grid-cols-4 sm:divide-x">
+        <Metric label="Followers" value={followers} delta={net} />
+        <Metric label="Reach" value={reach} icon={Eye} />
+        <Metric label="Profile views" value={profileViews} icon={Eye} />
+        <Metric label="Days tracked" value={series.length} />
+      </div>
+
+      {series.length > 1 && (
+        <div className="border-t border-border px-2 pb-2 pt-4">
+          <p className="px-3 text-[11px] uppercase tracking-wider text-muted-foreground">Daily reach</p>
+          <ResponsiveContainer width="100%" height={120}>
+            <AreaChart data={series} margin={{ top: 10, right: 12, left: 12, bottom: 0 }}>
+              <defs>
+                <linearGradient id="dashReach" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="var(--accent)" stopOpacity={0.35} />
+                  <stop offset="100%" stopColor="var(--accent)" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <XAxis dataKey="date" hide />
+              <YAxis hide domain={[0, "dataMax"]} />
+              <Tooltip
+                cursor={{ stroke: "var(--accent)", strokeWidth: 1, strokeDasharray: "3 3" }}
+                contentStyle={{
+                  background: "var(--popover)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 10,
+                  fontSize: 12,
+                  color: "var(--popover-foreground)",
+                }}
+                labelFormatter={(l) =>
+                  new Date(String(l)).toLocaleDateString(undefined, { day: "numeric", month: "short" })
+                }
+                formatter={(v) => [Number(v).toLocaleString(), "Reach"]}
+              />
+              <Area
+                type="monotone"
+                dataKey="reach"
+                stroke="var(--accent)"
+                strokeWidth={2}
+                fill="url(#dashReach)"
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      )}
     </Card>
   );
 }
 
-function ConnectionRow({ a }: { a: ApiConnection }) {
-  const healthColor = a.health === "healthy" ? "text-success" : a.health === "degraded" ? "text-warning" : a.health === "down" ? "text-danger" : "text-muted-foreground";
+function Metric({
+  label, value, delta, icon: Icon,
+}: {
+  label: string; value: number | null; delta?: number; icon?: React.ElementType;
+}) {
+  const showDelta = delta !== undefined && delta !== 0;
+  const up = (delta ?? 0) > 0;
   return (
-    <div className="flex items-center gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-muted/50">
-      <span className={cn("size-2 shrink-0 rounded-full", a.connected ? "bg-success" : "bg-muted-foreground/40")} />
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{a.name}</p>
-        <p className="text-[11px] text-muted-foreground">{a.connected ? `Synced ${a.lastSync}` : "Not connected"}</p>
+    <div className="p-5">
+      <div className="flex items-center gap-1.5">
+        {Icon && <Icon className="size-3.5 text-muted-foreground" />}
+        <p className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</p>
       </div>
-      <span className={cn("text-[11px] font-medium capitalize", healthColor)}>{a.health}</span>
+      <div className="mt-1.5 flex items-baseline gap-2">
+        <p className="text-[26px] font-semibold leading-none tabular-nums">
+          {value === null ? "—" : value.toLocaleString()}
+        </p>
+        {showDelta && (
+          <span
+            className={cn(
+              "inline-flex items-center gap-0.5 text-xs font-medium",
+              up ? "text-success" : "text-danger"
+            )}
+          >
+            {up ? <ArrowUpRight className="size-3.5" /> : <ArrowDownRight className="size-3.5" />}
+            {Math.abs(delta ?? 0).toLocaleString()}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
 
-function ScoreRing({ value }: { value: number }) {
-  const r = 30, c = 2 * Math.PI * r, off = c - (value / 100) * c;
+/* ------------------------------ Platform card ----------------------------- */
+
+function PlatformCard({
+  mod, status, highlighted,
+}: {
+  mod: (typeof platformModules)[number];
+  status: ReturnType<ReturnType<typeof usePlatformStatus>["statusFor"]>;
+  highlighted?: boolean;
+}) {
   return (
-    <div className="relative flex size-[84px] shrink-0 items-center justify-center">
-      <svg width={84} height={84} className="-rotate-90">
-        <circle cx={42} cy={42} r={r} fill="none" stroke="var(--muted)" strokeWidth={7} />
-        <circle cx={42} cy={42} r={r} fill="none" stroke="var(--accent)" strokeWidth={7} strokeLinecap="round" strokeDasharray={c} strokeDashoffset={off} />
-      </svg>
-      <span className="absolute text-sm font-semibold">{value}%</span>
-    </div>
+    <Link
+      href={mod.href}
+      className={cn(
+        "group rounded-xl border bg-card p-4 transition-colors",
+        highlighted ? "border-success/30 hover:border-success/50" : "border-border hover:border-accent/40"
+      )}
+    >
+      <div className="flex items-start gap-3">
+        <div
+          className={cn(
+            "flex size-9 shrink-0 items-center justify-center rounded-lg border bg-muted/40 transition-colors",
+            highlighted ? "border-success/25 text-success" : "border-border text-muted-foreground group-hover:text-accent"
+          )}
+        >
+          <mod.icon className="size-[18px]" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium leading-tight">{mod.name}</p>
+          <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{mod.description}</p>
+        </div>
+      </div>
+      <div className="mt-3 flex items-center justify-between border-t border-border pt-3">
+        <StatusDot state={status.state} label={status.label} />
+        <span className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors group-hover:text-accent">
+          Open <ArrowRight className="size-3.5" />
+        </span>
+      </div>
+    </Link>
   );
-}
-function ProgressRow({ label, value, total, color }: { label: string; value: number; total: number; color: string }) {
-  return (
-    <div className="flex items-center gap-2">
-      <span className="w-16 shrink-0 text-xs text-muted-foreground">{label}</span>
-      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full" style={{ width: `${(value / total) * 100}%`, background: color }} /></div>
-      <span className="w-5 shrink-0 text-right text-xs font-medium">{value}</span>
-    </div>
-  );
-}
-function Legend({ color, label }: { color: string; label: string }) {
-  return <div className="flex items-center gap-1.5 text-muted-foreground"><span className="size-2.5 rounded-full" style={{ background: color }} />{label}</div>;
 }

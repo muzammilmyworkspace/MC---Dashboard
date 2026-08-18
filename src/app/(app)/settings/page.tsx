@@ -2,345 +2,250 @@
 
 import { Suspense, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useTheme } from "next-themes";
-import { toast } from "sonner";
+import { motion } from "framer-motion";
 import {
-  User as UserIcon, Bell, ShieldCheck, Palette, Building2, Plug, Check,
-  Monitor, Moon, Sun, LogOut, Laptop, Smartphone, KeyRound,
+  User as UserIcon, SlidersHorizontal, ShieldCheck, Plug, LogOut,
+  Sun, Moon, Monitor, Info, ArrowRight,
 } from "lucide-react";
-import { PageBody, PageHeader, SectionCard, StatusPill } from "@/components/ui/page-shell";
-import { Field, TextInput, Select } from "@/components/ui/field";
+import { useUI } from "@/lib/store";
+import { platformModules } from "@/lib/modules-registry";
+import { usePlatformStatus } from "@/lib/platform-status";
+import { currentUser, roleLabel, users } from "@/lib/data";
+import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
-import { Card } from "@/components/ui/card";
-import { useSettings, languages, timezones, avatarPalette, settingsDefaults, type NotificationPrefs } from "@/lib/settings";
-import { connectionConfigs, useConnections, type ConnectionKey } from "@/lib/connections";
-import { useUI } from "@/lib/store";
-import { roleLabel } from "@/lib/data";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { StatusDot } from "@/components/ui/status-dot";
 import { cn } from "@/lib/utils";
 
 const TABS = [
-  { key: "profile", label: "Profile", icon: UserIcon },
-  { key: "notifications", label: "Notifications", icon: Bell },
-  { key: "accounts", label: "Connected accounts", icon: Plug },
+  { key: "account", label: "Account", icon: UserIcon },
+  { key: "preferences", label: "Preferences", icon: SlidersHorizontal },
   { key: "security", label: "Security", icon: ShieldCheck },
-  { key: "appearance", label: "Appearance", icon: Palette },
-  { key: "workspace", label: "Workspace", icon: Building2 },
+  { key: "integrations", label: "Integrations", icon: Plug },
 ] as const;
+
 type TabKey = (typeof TABS)[number]["key"];
-
-function SettingsInner() {
-  const params = useSearchParams();
-  const initial = (params.get("tab") as TabKey) ?? "profile";
-  const [tab, setTab] = useState<TabKey>(TABS.some((t) => t.key === initial) ? initial : "profile");
-
-  const { profile, notifications, workspace, setProfile, setNotifications, setWorkspace } = useSettings();
-  const { viewAs, signOut } = useUI();
-  const { theme, setTheme } = useTheme();
-
-  // Draft copies so Cancel actually reverts.
-  const [draftProfile, setDraftProfile] = useState(profile);
-  const [draftWorkspace, setDraftWorkspace] = useState(workspace);
-  const [pw, setPw] = useState({ current: "", next: "", confirm: "" });
-  const [pwError, setPwError] = useState<string | null>(null);
-
-  function saveProfile() {
-    if (!draftProfile.name.trim()) return toast.error("Name can't be empty");
-    setProfile(draftProfile);
-    toast.success("Profile saved");
-  }
-  function saveWorkspace() {
-    if (!draftWorkspace.name.trim()) return toast.error("Workspace name can't be empty");
-    setWorkspace(draftWorkspace);
-    toast.success("Workspace settings saved");
-  }
-  function changePassword() {
-    if (pw.next.length < 8) return setPwError("Use at least 8 characters.");
-    if (pw.next !== pw.confirm) return setPwError("The two new passwords don't match.");
-    if (!pw.current) return setPwError("Enter your current password.");
-    setPwError(null);
-    setPw({ current: "", next: "", confirm: "" });
-    toast.success("Password updated");
-  }
-
-  return (
-    <PageBody>
-      <PageHeader
-        icon={UserIcon}
-        eyebrow="Settings"
-        title="Profile & workspace"
-        description="Manage your details, how you're notified, and how the workspace behaves."
-      />
-
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[220px_1fr]">
-        {/* Tabs */}
-        <nav className="no-scrollbar flex gap-1 overflow-x-auto lg:flex-col lg:overflow-visible">
-          {TABS.map((t) => (
-            <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
-              className={cn(
-                "flex shrink-0 items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-colors lg:w-full",
-                tab === t.key ? "bg-accent/10 text-accent" : "text-muted-foreground hover:bg-muted hover:text-foreground"
-              )}
-            >
-              <t.icon className="size-4" /> {t.label}
-            </button>
-          ))}
-        </nav>
-
-        <div className="space-y-5">
-          {/* ------------------------------ Profile ----------------------------- */}
-          {tab === "profile" && (
-            <>
-              <SectionCard
-                title="Profile information"
-                description="How you appear across the workspace."
-                actions={
-                  <div className="flex gap-2">
-                    <Button variant="secondary" size="sm" onClick={() => setDraftProfile(profile)}>Cancel</Button>
-                    <Button size="sm" onClick={saveProfile}><Check className="size-4" /> Save</Button>
-                  </div>
-                }
-              >
-                <div className="flex flex-col gap-5 sm:flex-row">
-                  <div className="flex flex-col items-center gap-3">
-                    <Avatar name={draftProfile.name || "MC"} color={draftProfile.avatarColor} size={72} />
-                    <div className="flex flex-wrap justify-center gap-1.5" style={{ maxWidth: 132 }}>
-                      {avatarPalette.map((c) => (
-                        <button
-                          key={c}
-                          onClick={() => setDraftProfile({ ...draftProfile, avatarColor: c })}
-                          aria-label={`Use colour ${c}`}
-                          className={cn("size-5 rounded-full ring-2 transition-transform hover:scale-110", draftProfile.avatarColor === c ? "ring-foreground" : "ring-transparent")}
-                          style={{ background: c }}
-                        />
-                      ))}
-                    </div>
-                    <p className="text-[11px] text-muted-foreground">Avatar colour</p>
-                  </div>
-
-                  <div className="grid flex-1 grid-cols-1 gap-4 sm:grid-cols-2">
-                    <Field label="Full name" required htmlFor="name">
-                      <TextInput id="name" value={draftProfile.name} onChange={(e) => setDraftProfile({ ...draftProfile, name: e.target.value })} />
-                    </Field>
-                    <Field label="Job title" htmlFor="title">
-                      <TextInput id="title" value={draftProfile.title} onChange={(e) => setDraftProfile({ ...draftProfile, title: e.target.value })} />
-                    </Field>
-                    <Field label="Email" hint="Used for sign-in and notifications." htmlFor="email">
-                      <TextInput id="email" type="email" value={draftProfile.email} onChange={(e) => setDraftProfile({ ...draftProfile, email: e.target.value })} />
-                    </Field>
-                    <Field label="Role" hint="Set by an administrator.">
-                      <div className="flex h-10 items-center rounded-lg border border-border bg-muted/40 px-3 text-sm">{roleLabel[viewAs]}</div>
-                    </Field>
-                    <Field label="Language" htmlFor="lang">
-                      <Select id="lang" value={draftProfile.language} onChange={(e) => setDraftProfile({ ...draftProfile, language: e.target.value })}>
-                        {languages.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
-                      </Select>
-                    </Field>
-                    <Field label="Timezone" hint="Posting times use this zone." htmlFor="tz">
-                      <Select id="tz" value={draftProfile.timezone} onChange={(e) => setDraftProfile({ ...draftProfile, timezone: e.target.value })}>
-                        {timezones.map((t) => <option key={t} value={t}>{t}</option>)}
-                      </Select>
-                    </Field>
-                  </div>
-                </div>
-              </SectionCard>
-            </>
-          )}
-
-          {/* --------------------------- Notifications -------------------------- */}
-          {tab === "notifications" && (
-            <SectionCard title="Notification preferences" description="Choose what you want to hear about." icon={Bell}>
-              <div className="space-y-1">
-                {([
-                  ["contentApproved", "Content approved", "When the client approves a post."],
-                  ["changesRequested", "Changes requested", "When something needs another pass."],
-                  ["newComment", "New comment", "When someone comments on content."],
-                  ["upcomingPost", "Upcoming post reminder", "The day before something goes live."],
-                  ["weeklySummary", "Weekly summary", "A Monday round-up of the week ahead."],
-                  ["emailDigest", "Also send by email", "Receive the same alerts in your inbox."],
-                ] as [keyof NotificationPrefs, string, string][]).map(([key, label, hint]) => (
-                  <Toggle
-                    key={key}
-                    checked={notifications[key]}
-                    onChange={(v) => { setNotifications({ [key]: v } as Partial<NotificationPrefs>); toast.success("Preference saved"); }}
-                    label={label}
-                    hint={hint}
-                  />
-                ))}
-              </div>
-            </SectionCard>
-          )}
-
-          {/* ------------------------- Connected accounts ----------------------- */}
-          {tab === "accounts" && <ConnectedAccounts />}
-
-          {/* ------------------------------ Security ---------------------------- */}
-          {tab === "security" && (
-            <>
-              <SectionCard title="Change password" description="Use at least 8 characters." icon={KeyRound}>
-                <div className="grid max-w-md grid-cols-1 gap-4">
-                  <Field label="Current password" htmlFor="cpw">
-                    <TextInput id="cpw" type="password" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} />
-                  </Field>
-                  <Field label="New password" htmlFor="npw">
-                    <TextInput id="npw" type="password" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} />
-                  </Field>
-                  <Field label="Confirm new password" error={pwError ?? undefined} htmlFor="rpw">
-                    <TextInput id="rpw" type="password" invalid={!!pwError} value={pw.confirm} onChange={(e) => setPw({ ...pw, confirm: e.target.value })} />
-                  </Field>
-                  <div><Button onClick={changePassword}><Check className="size-4" /> Update password</Button></div>
-                </div>
-              </SectionCard>
-
-              <SectionCard title="Active sessions" description="Devices currently signed in to this workspace." icon={ShieldCheck}>
-                <div className="space-y-2">
-                  {[
-                    { icon: Laptop, device: "This device — Chrome on Windows", where: "Amsterdam, NL", current: true },
-                    { icon: Smartphone, device: "iPhone — Safari", where: "Amsterdam, NL", current: false },
-                  ].map((s) => (
-                    <div key={s.device} className="flex items-center gap-3 rounded-xl border border-border p-3">
-                      <div className="flex size-9 items-center justify-center rounded-lg bg-muted"><s.icon className="size-4 text-muted-foreground" /></div>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">{s.device}</p>
-                        <p className="text-xs text-muted-foreground">{s.where}</p>
-                      </div>
-                      {s.current ? <StatusPill tone="success">Current</StatusPill> : (
-                        <Button variant="outline" size="sm" onClick={() => toast("Session revoked")}>Revoke</Button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-                <Button variant="outline" className="mt-4" onClick={() => { signOut(); toast("Signed out of all devices"); }}>
-                  <LogOut className="size-4" /> Sign out everywhere
-                </Button>
-              </SectionCard>
-            </>
-          )}
-
-          {/* ---------------------------- Appearance ---------------------------- */}
-          {tab === "appearance" && (
-            <SectionCard title="Appearance" description="Choose how the dashboard looks." icon={Palette}>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                {[
-                  { key: "light", label: "Light", icon: Sun },
-                  { key: "dark", label: "Dark", icon: Moon },
-                  { key: "system", label: "System", icon: Monitor },
-                ].map((o) => (
-                  <button
-                    key={o.key}
-                    onClick={() => { setTheme(o.key); toast.success(`${o.label} theme applied`); }}
-                    className={cn(
-                      "flex flex-col items-center gap-2 rounded-xl border p-5 transition-colors",
-                      theme === o.key ? "border-accent bg-accent/[0.06]" : "border-border hover:border-accent/40"
-                    )}
-                  >
-                    <o.icon className={cn("size-5", theme === o.key ? "text-accent" : "text-muted-foreground")} />
-                    <span className="text-sm font-medium">{o.label}</span>
-                  </button>
-                ))}
-              </div>
-            </SectionCard>
-          )}
-
-          {/* ---------------------------- Workspace ----------------------------- */}
-          {tab === "workspace" && (
-            <SectionCard
-              title="Workspace settings"
-              description="Applies to everyone in this workspace."
-              icon={Building2}
-              actions={
-                <div className="flex gap-2">
-                  <Button variant="secondary" size="sm" onClick={() => setDraftWorkspace(workspace)}>Cancel</Button>
-                  <Button size="sm" onClick={saveWorkspace}><Check className="size-4" /> Save</Button>
-                </div>
-              }
-            >
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <Field label="Workspace name" required htmlFor="wsname">
-                  <TextInput id="wsname" value={draftWorkspace.name} onChange={(e) => setDraftWorkspace({ ...draftWorkspace, name: e.target.value })} />
-                </Field>
-                <Field label="Client name" htmlFor="client">
-                  <TextInput id="client" value={draftWorkspace.clientName} onChange={(e) => setDraftWorkspace({ ...draftWorkspace, clientName: e.target.value })} />
-                </Field>
-                <Field label="Default posting time" hint="Used when you add a new post." htmlFor="dpt">
-                  <TextInput id="dpt" type="time" value={draftWorkspace.defaultPostTime} onChange={(e) => setDraftWorkspace({ ...draftWorkspace, defaultPostTime: e.target.value })} />
-                </Field>
-                <Field label="Week starts on">
-                  <Select value={draftWorkspace.weekStartsMonday ? "mon" : "sun"} onChange={(e) => setDraftWorkspace({ ...draftWorkspace, weekStartsMonday: e.target.value === "mon" })}>
-                    <option value="mon">Monday</option>
-                    <option value="sun">Sunday</option>
-                  </Select>
-                </Field>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="mt-5"
-                onClick={() => { setDraftWorkspace(settingsDefaults.workspace); toast("Reset to defaults — press Save to apply"); }}
-              >
-                Reset to defaults
-              </Button>
-            </SectionCard>
-          )}
-        </div>
-      </div>
-    </PageBody>
-  );
-}
-
-function ConnectedAccounts() {
-  const { getState } = useConnections();
-  const keys = Object.keys(connectionConfigs) as ConnectionKey[];
-  return (
-    <SectionCard title="Connected accounts" description="Ad and social platforms linked to this workspace." icon={Plug}>
-      <div className="space-y-2">
-        {keys.map((k) => {
-          const cfg = connectionConfigs[k];
-          const st = getState(k);
-          const connected = st.status === "connected";
-          return (
-            <div key={k} className="flex items-center gap-3 rounded-xl border border-border p-3">
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">{cfg.name}</p>
-                <p className="truncate text-xs text-muted-foreground">{cfg.blurb}</p>
-              </div>
-              <StatusPill tone={connected ? "success" : "muted"}>{connected ? "Connected" : "Not connected"}</StatusPill>
-              <Button variant="outline" size="sm" asChild><Link href={`/${k}`}>Manage</Link></Button>
-            </div>
-          );
-        })}
-      </div>
-      <Card className="mt-4 p-3">
-        <p className="text-xs text-muted-foreground">
-          Looking for storage, email or AI connections? Those live in the{" "}
-          <Link href="/integrations" className="font-medium text-accent hover:underline">Integration Center</Link>.
-        </p>
-      </Card>
-    </SectionCard>
-  );
-}
-
-function Toggle({ checked, onChange, label, hint }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint: string }) {
-  return (
-    <button onClick={() => onChange(!checked)} className="flex w-full items-center gap-3 rounded-xl px-2 py-2.5 text-left transition-colors hover:bg-muted/50">
-      <span className={cn("relative h-5 w-9 shrink-0 rounded-full transition-colors", checked ? "bg-accent" : "bg-muted-foreground/30")}>
-        <span className={cn("absolute top-0.5 size-4 rounded-full bg-white transition-transform", checked ? "translate-x-[18px]" : "translate-x-0.5")} />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block text-sm font-medium">{label}</span>
-        <span className="block text-xs text-muted-foreground">{hint}</span>
-      </span>
-    </button>
-  );
-}
 
 export default function SettingsPage() {
   return (
-    <Suspense fallback={<div className="skeleton h-96 rounded-2xl" />}>
+    <Suspense fallback={<Card className="h-64 animate-pulse bg-muted/40" />}>
       <SettingsInner />
     </Suspense>
+  );
+}
+
+function SettingsInner() {
+  const params = useSearchParams();
+  const router = useRouter();
+  const { viewAs, signOut } = useUI();
+  const requested = params.get("tab") as TabKey | null;
+  const [tab, setTab] = useState<TabKey>(
+    TABS.some((t) => t.key === requested) ? (requested as TabKey) : "account"
+  );
+  const [confirmSignOut, setConfirmSignOut] = useState(false);
+
+  const user = users.find((u) => u.role === viewAs) ?? currentUser;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+      className="mx-auto w-full max-w-5xl space-y-6"
+    >
+      <div>
+        <h2 className="text-xl font-semibold tracking-tight">Settings</h2>
+        <p className="mt-1 text-sm text-muted-foreground">Manage your account, preferences and connections.</p>
+      </div>
+
+      <div className="no-scrollbar -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={cn(
+              "inline-flex shrink-0 items-center gap-2 rounded-lg border px-3.5 py-2 text-[13px] font-medium transition-colors",
+              tab === t.key
+                ? "border-accent/40 bg-accent-soft text-accent"
+                : "border-border text-muted-foreground hover:border-accent/30 hover:text-foreground"
+            )}
+          >
+            <t.icon className="size-4" /> {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "account" && <AccountTab name={user.name} email={user.email} color={user.avatarColor} role={roleLabel[user.role]} />}
+      {tab === "preferences" && <PreferencesTab />}
+      {tab === "security" && <SecurityTab />}
+      {tab === "integrations" && <IntegrationsTab />}
+
+      <Card className="flex flex-wrap items-center justify-between gap-3 p-5">
+        <div>
+          <p className="text-sm font-semibold">Log out</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">End this session on this device.</p>
+        </div>
+        <Button variant="outline" onClick={() => setConfirmSignOut(true)}>
+          <LogOut className="size-4" /> Log out
+        </Button>
+      </Card>
+
+      <Dialog open={confirmSignOut} onOpenChange={setConfirmSignOut}>
+        <DialogContent className="max-w-sm p-6">
+          <DialogTitle>Log out?</DialogTitle>
+          <p className="mt-2 text-sm text-muted-foreground">
+            You&apos;ll need to sign in again. Connected platforms stay connected.
+          </p>
+          <div className="mt-5 flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setConfirmSignOut(false)}>Cancel</Button>
+            <Button onClick={() => { setConfirmSignOut(false); signOut(); router.replace("/login"); }}>
+              <LogOut className="size-4" /> Log out
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </motion.div>
+  );
+}
+
+/* --------------------------------- tabs ---------------------------------- */
+
+function AccountTab({ name, email, color, role }: { name: string; email: string; color: string; role: string }) {
+  return (
+    <div className="space-y-4">
+      <Section title="Profile" description="How you appear across the workspace.">
+        <div className="flex flex-wrap items-center gap-4">
+          <Avatar name={name} color={color} size={56} />
+          <div className="min-w-0">
+            <p className="text-sm font-semibold">{name}</p>
+            <p className="truncate text-sm text-muted-foreground">{email}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{role}</p>
+          </div>
+        </div>
+        <ReadOnlyNote>
+          Profile details come from your account on the server. Editing them from the dashboard
+          isn&apos;t built yet.
+        </ReadOnlyNote>
+      </Section>
+    </div>
+  );
+}
+
+function PreferencesTab() {
+  const { theme, setTheme } = useTheme();
+  const options = [
+    { key: "light", label: "Light", icon: Sun },
+    { key: "dark", label: "Dark", icon: Moon },
+    { key: "system", label: "System", icon: Monitor },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <Section title="Theme" description="Applies immediately and is remembered on this device.">
+        <div className="flex flex-wrap gap-2">
+          {options.map((o) => (
+            <button
+              key={o.key}
+              onClick={() => setTheme(o.key)}
+              className={cn(
+                "inline-flex items-center gap-2 rounded-lg border px-3.5 py-2 text-[13px] font-medium transition-colors",
+                theme === o.key
+                  ? "border-accent/40 bg-accent-soft text-accent"
+                  : "border-border text-muted-foreground hover:border-accent/30 hover:text-foreground"
+              )}
+            >
+              <o.icon className="size-4" /> {o.label}
+            </button>
+          ))}
+        </div>
+      </Section>
+
+      <Section title="Notifications" description="Which events reach you.">
+        <ReadOnlyNote>
+          Notification delivery isn&apos;t wired up yet. In-app notifications appear in the bell menu.
+        </ReadOnlyNote>
+      </Section>
+    </div>
+  );
+}
+
+function SecurityTab() {
+  return (
+    <div className="space-y-4">
+      <Section title="Password" description="Used to sign in to MC Nexus.">
+        <ReadOnlyNote>
+          Password changes aren&apos;t available from the dashboard yet. Accounts are managed on the server.
+        </ReadOnlyNote>
+      </Section>
+
+      <Section title="Sessions" description="Where you&apos;re signed in.">
+        <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
+          <div>
+            <p className="text-sm font-medium">This device</p>
+            <p className="text-xs text-muted-foreground">Current session</p>
+          </div>
+          <StatusDot state="connected" label="Active" />
+        </div>
+        <ReadOnlyNote>
+          Sessions use refresh tokens that can be revoked server-side. Listing and revoking them
+          from here isn&apos;t built yet.
+        </ReadOnlyNote>
+      </Section>
+    </div>
+  );
+}
+
+function IntegrationsTab() {
+  const { statusFor } = usePlatformStatus();
+  return (
+    <Section title="Connected platforms" description="Manage connections from the Integrations screen.">
+      <ul className="divide-y divide-border">
+        {platformModules.map((m) => {
+          const status = statusFor(m.integrationKey);
+          return (
+            <li key={m.href} className="flex items-center justify-between gap-3 py-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <m.icon className="size-4 shrink-0 text-muted-foreground" />
+                <span className="truncate text-sm">{m.name}</span>
+              </div>
+              <div className="flex shrink-0 items-center gap-4">
+                <StatusDot state={status.state} label={status.label} />
+                <Link href={m.href} className="text-muted-foreground transition-colors hover:text-accent">
+                  <ArrowRight className="size-4" />
+                </Link>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      <Button variant="outline" size="sm" className="mt-4" asChild>
+        <Link href="/integrations"><Plug className="size-4" /> Open Integrations</Link>
+      </Button>
+    </Section>
+  );
+}
+
+/* -------------------------------- helpers -------------------------------- */
+
+function Section({ title, description, children }: { title: string; description?: string; children: React.ReactNode }) {
+  return (
+    <Card className="p-5">
+      <h3 className="text-sm font-semibold">{title}</h3>
+      {description && <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>}
+      <div className="mt-4">{children}</div>
+    </Card>
+  );
+}
+
+/** Marks a surface as not-yet-functional instead of showing a dead control. */
+function ReadOnlyNote({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="mt-4 flex items-start gap-2.5 rounded-lg border border-border bg-muted/30 p-3">
+      <Info className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+      <p className="text-xs text-muted-foreground">{children}</p>
+    </div>
   );
 }

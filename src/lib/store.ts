@@ -1,7 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { type Role } from "./data";
-import { defaultSections, type SidebarSections, type SectionKey } from "./nav";
 
 interface UIState {
   collapsed: boolean;
@@ -20,15 +19,6 @@ interface UIState {
   setViewAs: (r: Role) => void;
   signIn: (r: Role) => void;
   signOut: () => void;
-
-  // Draggable sidebar task layout (persisted)
-  sections: SidebarSections;
-  setSections: (s: SidebarSections) => void;
-  resetSections: () => void;
-
-  // Collapsible sidebar groups (persisted)
-  expanded: Record<SectionKey, boolean>;
-  toggleSection: (k: SectionKey) => void;
 }
 
 export const useUI = create<UIState>()(
@@ -49,21 +39,16 @@ export const useUI = create<UIState>()(
       setViewAs: (r) => set({ viewAs: r }),
       signIn: (r) => set({ authed: true, viewAs: r }),
       signOut: () => set({ authed: false }),
-
-      sections: defaultSections,
-      setSections: (s) => set({ sections: s }),
-      resetSections: () => set({ sections: defaultSections }),
-
-      expanded: { muzammil: true, hashaam: true, future: true },
-      toggleSection: (k) => set((s) => ({ expanded: { ...s.expanded, [k]: !s.expanded[k] } })),
     }),
     {
-      name: "mc-nexus-ui-v4",
+      // v5: the task-section layout was removed with the Muzammil/Hashaam
+      // sidebar. Bumping the key also clears any `authed: true` left over
+      // from the old mock login, which used to let the UI look signed in
+      // while the API had never issued a token.
+      name: "mc-nexus-ui-v5",
       partialize: (s) => ({
         collapsed: s.collapsed,
         viewAs: s.viewAs,
-        sections: s.sections,
-        expanded: s.expanded,
         authed: s.authed,
       }),
     }
