@@ -19,6 +19,8 @@
  * localhost. It stays overridable for the case where the API is genuinely
  * hosted elsewhere.
  */
+import type { DashboardOverview } from "./dashboard-types";
+
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 /**
@@ -500,13 +502,12 @@ export const api = {
   },
 
   dashboard: {
-    overview: () =>
-      get<{
-        content: { total: number; counts: Record<string, number>; awaiting: number; completion: number };
-        integrations: { total: number; connected: number; items: unknown[] };
-        recentReviews: unknown[];
-        upcoming: { date: string; topic: string; status: string }[];
-      }>("/api/dashboard/overview"),
+    /**
+     * Whole executive overview in one request — Instagram, Facebook, Meta Ads,
+     * alerts and platform health. Aggregated server-side so the dashboard does
+     * not fan out into a dozen browser requests on every load.
+     */
+    overview: (days = 30) => get<DashboardOverview>(`/api/dashboard/overview?days=${days}`),
   },
 
   notifications: {

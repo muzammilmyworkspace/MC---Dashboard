@@ -101,12 +101,18 @@ export async function syncInstagram(trigger = "manual"): Promise<SyncResult> {
             // Counts stay null: we never observed this day's profile, and
             // substituting today's total would silently zero out `net` and
             // make every derived unfollow figure wrong.
+            //
+            // newFollowers is deliberately NOT written here. This endpoint
+            // buckets days by Meta's end_time minus one day, while the
+            // measured follows/unfollows pair buckets by the day itself. Two
+            // conventions writing one column disagreed by a day and produced
+            // a follows figure that did not belong with its unfollows —
+            // yielding a net change that never happened. The measured pair
+            // below is the single source for both halves.
             reach: daily.reach[key],
-            newFollowers: daily.newFollowers[key],
           },
           update: {
             reach: daily.reach[key],
-            newFollowers: daily.newFollowers[key],
           },
         });
         daysBackfilled++;
