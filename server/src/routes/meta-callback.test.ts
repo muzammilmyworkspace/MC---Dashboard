@@ -9,6 +9,12 @@ import { after, before, describe, it, mock } from "node:test";
 import assert from "node:assert/strict";
 import type { Server } from "node:http";
 
+// No Redis in tests. dotenv loads the real .env, so leaving REDIS_URL set
+// opens a live connection — and an open socket keeps the event loop alive,
+// so the test runner never exits. The in-process fallback is what these
+// tests should exercise anyway.
+process.env.REDIS_URL = "";
+
 process.env.DATABASE_URL ??= "postgresql://test:test@localhost:5432/test";
 process.env.JWT_ACCESS_SECRET = "test-access-secret-32-chars-minimum!!";
 process.env.JWT_REFRESH_SECRET = "test-refresh-secret-32-chars-minimum!";

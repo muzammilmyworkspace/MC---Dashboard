@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "crons": [
+    {
+      "comment": "Instagram snapshot. IgDailySnapshot is the only source of follower history and Meta sells none, so a missed run is a permanent gap in the chart. Hobby plans allow one cron per day; on Pro, change to '0 */6 * * *' for the original 6-hourly cadence.",
+      "path": "/api/cron/instagram-sync",
+      "schedule": "0 6 * * *"
+    }
+  ]
+}

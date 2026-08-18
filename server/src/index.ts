@@ -7,6 +7,7 @@ import { startSyncScheduler, stopSyncScheduler } from "./services/deployments/sy
 import { startInstagramScheduler, stopInstagramScheduler } from "./services/instagram/sync.js";
 import { assertNoPublicSecrets } from "./services/integrations/meta-config.js";
 import { assertNoDuplicateEnvKeys } from "./lib/env-audit.js";
+import { disconnectRedis } from "./lib/redis.js";
 
 assertNoDuplicateEnvKeys();
 assertNoPublicSecrets();
@@ -37,6 +38,7 @@ async function shutdown(signal: string) {
   console.log(`\n${signal} received — shutting down…`);
   stopSyncScheduler();
   stopInstagramScheduler();
+  void disconnectRedis();
   server.close();
   await disconnectDb();
   process.exit(0);

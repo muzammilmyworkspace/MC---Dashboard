@@ -10,7 +10,16 @@
  *    const { plans } = await api.dayPlans.list("2026-07")
  * ------------------------------------------------------------------ */
 
-export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+/**
+ * Empty string means same-origin: the API now lives in this app's own
+ * /api routes, so there is no separate host to point at.
+ *
+ * That removes a whole class of deployment failure — a missing or stale
+ * NEXT_PUBLIC_API_URL used to make the deployed site call the visitor's own
+ * localhost. It stays overridable for the case where the API is genuinely
+ * hosted elsewhere.
+ */
+export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 /**
  * Detects the deployment mistake this fallback invites: the app is served

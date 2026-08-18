@@ -4,8 +4,10 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import morgan from "morgan";
 import rateLimit from "express-rate-limit";
-import { corsOrigins, isProd } from "./env.js";
+import { RedisStore } from "rate-limit-redis";
+import { corsOrigins, env, isProd } from "./env.js";
 import { prisma } from "./lib/prisma.js";
+import { redis } from "./lib/redis.js";
 import { errorHandler, notFoundHandler } from "./middleware/error.js";
 import { authRouter } from "./routes/auth.routes.js";
 import { dayPlanRouter } from "./routes/dayplans.routes.js";
@@ -15,6 +17,25 @@ import { auditRouter, dashboardRouter, notificationRouter, userRouter } from "./
 import { taskRouter } from "./routes/tasks.routes.js";
 import { deploymentRouter, webhookRouter } from "./routes/deployments.routes.js";
 import { instagramRouter } from "./routes/instagram.routes.js";
+
+/**
+ * Redis-backed store for express-rate-limit, or nothing when Redis isn't
+ * configured — in which case the library's in-memory store applies.
+ *
+ * Written as a function so the non-null client is captured in a local:
+ * narrowing on the module-level `redis` doesn't survive into the callback.
+ */
+function redisRateLimitStore() {
+  const client = redis;
+  if (!client) return {};
+  return {
+    store: new RedisStore({
+      prefix: `${env.REDIS_PREFIX}:rl:`,
+      sendCommand: (...args: string[]) =>
+        client.call(...(args as [string, ...string[]])) as Promise<never>,
+    }),
+  };
+}
 
 export function createApp() {
   const app = express();
@@ -56,6 +77,9 @@ export function createApp() {
   if (!isProd) app.use(morgan("dev"));
 
   // Baseline throttle for the whole API (auth routes add a tighter limit).
+  // Backed by Redis when available so the limit holds across restarts and
+  // instances; the default in-memory store is per-process, which means a
+  // restart hands an attacker a fresh budget.
   app.use(
     "/api",
     rateLimit({
@@ -64,6 +88,7 @@ export function createApp() {
       standardHeaders: "draft-7",
       legacyHeaders: false,
       message: { error: { code: "RATE_LIMITED", message: "Too many requests" } },
+      ...redisRateLimitStore(),
     })
   );
 
