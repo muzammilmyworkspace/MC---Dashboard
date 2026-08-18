@@ -1,0 +1,5 @@
+# The Express API is deployed separately (see DEPLOYMENT.md) — Vercel builds
+# only the Next.js dashboard at the repo root. Keeping server/ out of the
+# upload makes the build smaller and stops Next from ever reaching into a
+# workspace whose dependencies Vercel does not install.
+server/

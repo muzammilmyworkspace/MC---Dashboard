@@ -30,5 +30,14 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": [
+    "node_modules",
+    // The Express API is a separate app with its own tsconfig, its own
+    // dependencies and its own build. Next must not typecheck it: Vercel
+    // installs only the root package.json, so server-only imports such as
+    // bcryptjs resolve locally (via server/node_modules) but fail the
+    // deployed build.
+    "server",
+    "dist"
+  ]
 }
