@@ -13,7 +13,7 @@ import "server-only";
 import { env } from "../env";
 import { prisma } from "../prisma";
 import {
-  getAccount, getDailyInsights, getMedia, getMediaInsights, getTodayTotals,
+  getAccount, getDailyInsights, getFollowActivity, getMedia, getMediaInsights, getTodayTotals,
   igConfig, isConfigured, MetaApiError,
 } from "./client";
 
@@ -115,7 +115,38 @@ export async function syncInstagram(trigger = "manual"): Promise<SyncResult> {
       console.warn(`[instagram] daily insights skipped: ${(err as Error).message}`);
     }
 
-    /* 3 — Today's total_value metrics. */
+    /* 3 — Real follows/unfollows for today. Measured by Meta rather than
+           derived, so the report can state them as fact. Meta usually has no
+           data for the current day until it closes, hence yesterday too. */
+    // Meta's follow/unfollow data lags roughly two days, so a today-and-
+    // yesterday window finds nothing. Seven days costs seven calls once a day
+    // and also repairs any run that was missed.
+    const activityDays = Array.from({ length: 7 }, (_, i) => dayKey(new Date(Date.now() - i * 86_400_000)));
+
+    for (const target of activityDays) {
+      try {
+        const activity = await getFollowActivity(target, cfg);
+        if (activity.follows !== null || activity.unfollows !== null) {
+          await prisma.igDailySnapshot.upsert({
+            where: { igAccountId_date: { igAccountId: account.id, date: dateOnly(target) } },
+            create: {
+              igAccountId: account.id,
+              date: dateOnly(target),
+              newFollowers: activity.follows,
+              unfollows: activity.unfollows,
+            },
+            update: {
+              ...(activity.follows !== null ? { newFollowers: activity.follows } : {}),
+              ...(activity.unfollows !== null ? { unfollows: activity.unfollows } : {}),
+            },
+          });
+        }
+      } catch (err) {
+        console.warn(`[instagram] follow activity for ${target} skipped: ${(err as Error).message}`);
+      }
+    }
+
+    /* 4 — Today's total_value metrics. */
     try {
       const totals = await getTodayTotals(cfg);
       if (Object.values(totals).some((v) => v !== undefined)) {
@@ -210,12 +241,10 @@ export interface FollowerDay {
   net: number | null;
   /** Gross new follows, straight from Meta. */
   gained: number | null;
-  /**
-   * Derived, not reported: Meta exposes no unfollow data at all.
-   * unfollows = gained − net. Clamped at 0 because the two figures are
-   * sampled at different moments and can disagree by a follower or two.
-   */
+  /** Unfollows. Measured by Meta where available; see lostSource. */
   lost: number | null;
+  /** Whether  came from Meta or from the legacy (gained - net) estimate. */
+  lostSource: "measured" | "derived" | null;
   reach: number | null;
   views: number | null;
   profileViews: number | null;
@@ -240,7 +269,15 @@ export async function getFollowerHistory(days = 30, igAccountId?: string): Promi
         ? row.followersCount - prev.followersCount
         : null;
     const gained = row.newFollowers ?? null;
-    const lost = gained !== null && net !== null ? Math.max(0, gained - net) : null;
+
+    // Prefer Meta's measured figure. The old (gained - net) estimate stays as
+    // a fallback for days recorded before the metric was wired up, and the
+    // caller is told which one it got.
+    const measuredLost = row.unfollows ?? null;
+    const derivedLost = gained !== null && net !== null ? Math.max(0, gained - net) : null;
+    const lost = measuredLost ?? derivedLost;
+    const lostSource: "measured" | "derived" | null =
+      measuredLost !== null ? "measured" : derivedLost !== null ? "derived" : null;
 
     return {
       date: row.date.toISOString().slice(0, 10),
@@ -248,6 +285,7 @@ export async function getFollowerHistory(days = 30, igAccountId?: string): Promi
       net,
       gained,
       lost,
+      lostSource,
       reach: row.reach,
       views: row.views,
       profileViews: row.profileViews,

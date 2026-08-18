@@ -335,6 +335,12 @@ model IgDailySnapshot {
 
   /** Gross new follows that day, from the `follower_count` insight. */
   newFollowers      Int?
+  /**
+   * Real unfollows for the day, from `follows_and_unfollows` broken down by
+   * follow_type (NON_FOLLOWER). Measured by Meta — not the older
+   * (gained - net) estimate, which was only used before this metric was found.
+   */
+  unfollows         Int?
   reach             Int?
   /** `views` — Meta removed `impressions` for Instagram in v22. */
   views             Int?

@@ -366,6 +366,62 @@ export async function getMediaInsights(
   }
 }
 
+
+/* --------------------- Follows & unfollows (measured) -------------------- */
+
+export interface FollowActivity {
+  /** Accounts that started following on this day. */
+  follows: number | null;
+  /** Accounts that unfollowed. Measured by Meta, not derived. */
+  unfollows: number | null;
+}
+
+/**
+ * Real follows and unfollows for a single day.
+ *
+ * Meta exposes both through `follows_and_unfollows` broken down by
+ * `follow_type`: FOLLOWER counts new follows, NON_FOLLOWER counts unfollows.
+ * Verified against `follower_count` — the FOLLOWER totals match exactly over
+ * the same window, which is what confirms the mapping.
+ *
+ * This replaces deriving unfollows as (gained - net). That estimate was only
+ * ever necessary because this metric had not been found; it is measured now.
+ *
+ * `day` is YYYY-MM-DD. Returns nulls when Meta has no data for the day yet —
+ * the current day is typically empty until it closes.
+ */
+export async function getFollowActivity(day: string, cfg = igConfig()): Promise<FollowActivity> {
+  const since = Math.floor(new Date(`${day}T00:00:00.000Z`).getTime() / 1000);
+  const until = since + 86_400;
+
+  try {
+    const res = await graph<{
+      data?: {
+        total_value?: { breakdowns?: { results?: { dimension_values: string[]; value: number }[] }[] };
+      }[];
+    }>(
+      `${cfg.igAccountId}/insights`,
+      {
+        metric: "follows_and_unfollows",
+        metric_type: "total_value",
+        period: "day",
+        breakdown: "follow_type",
+        since,
+        until,
+      },
+      cfg
+    );
+
+    const results = res.data?.[0]?.total_value?.breakdowns?.[0]?.results ?? [];
+    const pick = (k: string) => results.find((r) => r.dimension_values[0] === k)?.value ?? null;
+    return { follows: pick("FOLLOWER"), unfollows: pick("NON_FOLLOWER") };
+  } catch (err) {
+    // Needs instagram_manage_insights; a miss must not fail the whole sync.
+    console.warn(`[instagram] follows_and_unfollows unavailable: ${(err as Error).message}`);
+    return { follows: null, unfollows: null };
+  }
+}
+
 /* ----------------------------- Diagnostics ------------------------------ */
 
 export interface TokenInfo {
