@@ -8,7 +8,7 @@ import { Logo, LogoMark } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useUI } from "@/lib/store";
-import { api, ApiRequestError } from "@/lib/api";
+import { api, API_URL, ApiRequestError } from "@/lib/api";
 import { users, roleLabel, type Role, type User } from "@/lib/data";
 import { initials, cn } from "@/lib/utils";
 
@@ -68,7 +68,12 @@ export default function LoginPage() {
             : `${err.message} (API said ${err.status})`
         );
       } else {
-        setError("Can't reach the API. Start the backend with \"npm run dev\" in server/.");
+        // A thrown fetch (rather than an error status) means the request never
+        // completed: wrong host, blocked by an extension, or CORS refused.
+        // Naming the URL and the browser's own reason turns an unactionable
+        // "can't reach the API" into something you can actually chase.
+        const reason = err instanceof Error && err.message ? ` — ${err.message}` : "";
+        setError(`Couldn't reach ${API_URL}${reason}. Check the backend is running and reachable from this browser.`);
       }
     }
   }
