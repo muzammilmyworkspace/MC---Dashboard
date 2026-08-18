@@ -1,5 +1,6 @@
-import { env } from "../../env.js";
-import { cacheDelete, cacheGet, cacheSet, redisEnabled } from "../../lib/redis.js";
+import "server-only";
+import { env } from "./env";
+import { cacheDelete, cacheGet, cacheSet, redisEnabled } from "./redis";
 
 /**
  * Shared HTTP client for provider APIs.

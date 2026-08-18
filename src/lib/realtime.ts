@@ -19,7 +19,18 @@ export type RealtimeEvent =
 
 let socket: Socket | null = null;
 
+/**
+ * Realtime needs a socket server, which only exists when the API is a
+ * separate long-running host. Same-origin (empty API_URL) means the API is
+ * running as serverless functions, where no connection can be held open —
+ * so connecting is skipped rather than left retrying forever against an
+ * endpoint that will never answer.
+ */
+const realtimeAvailable = API_URL !== "";
+
 export function connectRealtime(): Socket | null {
+  if (!realtimeAvailable) return null;
+
   const token = getAccessToken();
   if (!token) return null;
   if (socket?.connected) return socket;

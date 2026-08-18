@@ -21,6 +21,15 @@ const schema = z.object({
   // Credential encryption (64 hex chars). Falls back to a derived key in dev.
   ENCRYPTION_KEY: z.string().optional(),
 
+  /**
+   * Redis (Upstash). Optional on purpose: without it the app falls back to
+   * in-process caching and rate limiting, which is correct for a single
+   * instance. A Redis outage must slow things down, never take them down.
+   */
+  REDIS_URL: z.string().optional(),
+  /** Prefix for every key, so one database can host several environments. */
+  REDIS_PREFIX: z.string().default("mcnexus"),
+
   // --- Deployment Center ---------------------------------------------------
   GITHUB_TOKEN: z.string().optional(),
   GITHUB_CLIENT_ID: z.string().optional(),

@@ -17,6 +17,9 @@ import assert from "node:assert/strict";
  * so these win over whatever sits in server/.env — the suite never depends
  * on real credentials.
  */
+// See meta-callback.test.ts: a live Redis connection keeps the runner alive.
+process.env.REDIS_URL = "";
+
 process.env.DATABASE_URL ??= "postgresql://test:test@localhost:5432/test";
 process.env.JWT_ACCESS_SECRET = "test-access-secret-32-chars-minimum!!";
 process.env.JWT_REFRESH_SECRET = "test-refresh-secret-32-chars-minimum!";
