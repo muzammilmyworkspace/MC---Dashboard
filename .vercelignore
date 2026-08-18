@@ -1,5 +1,8 @@
-# The Express API is deployed separately (see DEPLOYMENT.md) — Vercel builds
-# only the Next.js dashboard at the repo root. Keeping server/ out of the
-# upload makes the build smaller and stops Next from ever reaching into a
-# workspace whose dependencies Vercel does not install.
-server/
+# The standalone Express app at the repo root is not deployed — the API now
+# runs as Next.js route handlers (see DEPLOYMENT.md).
+#
+# The leading slash is essential. This file uses gitignore syntax, where a
+# bare `server/` matches a directory of that name AT ANY DEPTH — which also
+# excluded src/server/, the app's entire server-side library, and broke the
+# deploy with unresolved imports in every API route.
+/server/
