@@ -1,5 +1,30 @@
 # Deploying MC Nexus
 
+## The cron schedule is load-bearing
+
+`vercel.json` runs `/api/cron/instagram-sync` daily at 06:00 UTC. That is not
+a convenience job.
+
+`IgDailySnapshot` holds one row per day and is the **only** source of
+historical follower totals. Meta reports followers as *now* and sells no
+history, so the gained/unfollowed figures are derived from these snapshots
+and a missed run is a permanent gap in the chart.
+
+Vercel's Hobby plan allows one cron run per day, which is why the schedule is
+daily rather than the original six-hourly. On Pro, change it to:
+
+```json
+"schedule": "0 */6 * * *"
+```
+
+Vercel's schema rejects unknown keys inside `crons`, so this explanation
+lives here rather than as a comment in the file.
+
+`CRON_SECRET` must be set, or the endpoint returns 503 rather than exposing a
+public trigger that would burn Meta API quota.
+
+
+
 This repo is **two applications**, and they deploy to different places:
 
 | Part | What it is | Where it goes |
