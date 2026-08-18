@@ -12,6 +12,44 @@
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
+/**
+ * Detects the deployment mistake this fallback invites: the app is served
+ * from a real host, but NEXT_PUBLIC_API_URL was never set, so every visitor's
+ * browser is told to call localhost — their own machine, where nothing is
+ * listening. The symptom is an unreachable API on the deployed site while
+ * everything works locally, which is easy to mistake for a backend outage.
+ *
+ * Returns an operator-facing explanation, or null when the config is sane.
+ */
+export function apiConfigProblem(): string | null {
+  if (typeof window === "undefined") return null;
+
+  const pageHost = window.location.hostname;
+  const pageIsLocal = pageHost === "localhost" || pageHost === "127.0.0.1" || pageHost === "[::1]";
+  if (pageIsLocal) return null;
+
+  let apiHost = "";
+  let apiProtocol = "";
+  try {
+    const url = new URL(API_URL);
+    apiHost = url.hostname;
+    apiProtocol = url.protocol;
+  } catch {
+    return `NEXT_PUBLIC_API_URL is not a valid URL ("${API_URL}").`;
+  }
+
+  if (apiHost === "localhost" || apiHost === "127.0.0.1") {
+    return "NEXT_PUBLIC_API_URL isn't set for this deployment, so the app is trying to call localhost. Set it to your deployed API's URL and redeploy.";
+  }
+
+  // An HTTPS page cannot call an HTTP API — browsers block it as mixed content.
+  if (window.location.protocol === "https:" && apiProtocol === "http:") {
+    return `This site is served over HTTPS but NEXT_PUBLIC_API_URL uses http:// (${API_URL}). Browsers block that. Use an https:// API URL.`;
+  }
+
+  return null;
+}
+
 export type Role = "TEAM" | "CLIENT";
 
 export interface ApiUser {

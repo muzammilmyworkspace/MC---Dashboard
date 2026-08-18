@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { platformModules } from "@/lib/modules-registry";
 import { usePlatformStatus } from "@/lib/platform-status";
-import { api, type IgOverview } from "@/lib/api";
+import { api, apiConfigProblem, type IgOverview } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/ui/status-dot";
@@ -69,7 +69,10 @@ export default function DashboardPage() {
           <div>
             <p className="text-sm font-medium">Can&apos;t reach the API</p>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Start the backend, then reload. Connection status and metrics are unavailable.
+              {/* On a deployed site this is nearly always a missing env var,
+                  not a stopped server. Naming it saves chasing the wrong thing. */}
+              {apiConfigProblem() ??
+                "Start the backend, then reload. Connection status and metrics are unavailable."}
             </p>
           </div>
         </Card>
