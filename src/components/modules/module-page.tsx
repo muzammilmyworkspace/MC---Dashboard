@@ -35,8 +35,8 @@ export function ModulePage({ href }: { href: string }) {
       className="mx-auto w-full max-w-5xl space-y-6"
     >
       <div className="flex flex-wrap items-start gap-4">
-        <div className="flex size-12 shrink-0 items-center justify-center rounded-xl border border-border bg-muted/40 text-accent">
-          <Icon className="size-6" />
+        <div className="flex size-12 shrink-0 items-center justify-center rounded-xl border border-border bg-muted/40 text-foreground">
+          <Icon className="size-7" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -49,8 +49,8 @@ export function ModulePage({ href }: { href: string }) {
 
       <Card className="p-6 sm:p-8">
         <div className="mx-auto max-w-md text-center">
-          <div className="mx-auto mb-4 flex size-11 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-            <Icon className="size-5" />
+          <div className="mx-auto mb-4 flex size-11 items-center justify-center rounded-xl bg-muted text-foreground">
+            <Icon className="size-6" />
           </div>
           <h3 className="text-base font-semibold">
             {canConnect ? `Connect ${mod.name} to get started` : `${mod.name} is coming next`}

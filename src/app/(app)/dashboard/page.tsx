@@ -4,10 +4,9 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip as RTooltip, XAxis, YAxis } from "recharts";
-import {
-  ArrowRight, ArrowUpRight, ArrowDownRight, RefreshCw, CheckCircle2,
-  AlertTriangle, Info, Camera, Contact, Megaphone, ExternalLink,
-} from "lucide-react";
+import { ArrowRight, ArrowUpRight, ArrowDownRight, RefreshCw, CheckCircle2, AlertTriangle, Info, ExternalLink } from "lucide-react";
+import { InstagramIcon, FacebookIcon, MetaIcon } from "@/components/brand/platform-icons";
+import { moduleFor } from "@/lib/modules-registry";
 import { api, ApiRequestError } from "@/lib/api";
 import type { DashboardOverview } from "@/lib/dashboard-types";
 import { Card } from "@/components/ui/card";
@@ -99,7 +98,7 @@ export default function DashboardPage() {
       {/* Platform summaries */}
       <section className="grid gap-4 lg:grid-cols-3">
         <PlatformSummary
-          icon={Camera} name="Instagram" href="/instagram"
+          icon={InstagramIcon} name="Instagram" href="/instagram"
           loading={loading} available={ig?.available ?? false}
           headline={ig?.followers ?? null} headlineLabel="Followers"
           trendPct={ig?.trendPct ?? null} windowDays={days}
@@ -112,7 +111,7 @@ export default function DashboardPage() {
         />
 
         <PlatformSummary
-          icon={Contact} name="Facebook" href="/facebook"
+          icon={FacebookIcon} name="Facebook" href="/facebook"
           loading={loading} available={fb?.available ?? false}
           headline={fb?.totalFollowers ?? null} headlineLabel="Followers"
           rows={[
@@ -124,7 +123,7 @@ export default function DashboardPage() {
         />
 
         <PlatformSummary
-          icon={Megaphone} name="Meta Ads" href="/meta"
+          icon={MetaIcon} name="Meta Ads" href="/meta"
           loading={loading} available={ads?.available ?? false}
           unavailableReason={ads?.reason ?? undefined}
           headline={ads?.insights?.spend ?? null} headlineLabel="Spend · 30 days"
@@ -215,13 +214,29 @@ export default function DashboardPage() {
       <section className="space-y-3">
         <h2 className="text-sm font-semibold">Connected platforms</h2>
         <Card className="divide-y divide-border">
-          {(data?.platforms ?? []).map((p) => (
+          {(data?.platforms ?? []).map((p) => {
+            // The registry already pairs every route with its mark, so the
+            // list cannot drift out of step with the sidebar.
+            const Mark = moduleFor(p.href)?.icon;
+            return (
             <Link
               key={p.key}
               href={p.href}
               className="flex items-center justify-between gap-3 px-5 py-3 transition-colors hover:bg-muted/30"
             >
-              <span className="text-sm">{p.name}</span>
+              <span className="flex items-center gap-3">
+                {Mark && (
+                  <span className={cn(
+                    "flex size-7 items-center justify-center rounded-md border border-border bg-muted/40 text-foreground",
+                    // A logo at full strength on a platform that is not wired
+                    // up would read as working, so those are dimmed.
+                    p.status === "not_connected" && "opacity-45 grayscale"
+                  )}>
+                    <Mark className="size-4" />
+                  </span>
+                )}
+                <span className="text-sm">{p.name}</span>
+              </span>
               <span className="flex items-center gap-4">
                 {p.lastSyncAt && (
                   <span className="hidden text-[11px] text-muted-foreground sm:inline">
@@ -234,7 +249,8 @@ export default function DashboardPage() {
                 />
               </span>
             </Link>
-          ))}
+            );
+          })}
           {loading && !data && <div className="h-40 animate-pulse bg-muted/40" />}
         </Card>
       </section>
@@ -270,7 +286,7 @@ function PlatformSummary({
     <Card className="flex flex-col p-5 transition-colors hover:border-accent/30">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-2.5">
-          <div className="flex size-9 items-center justify-center rounded-lg border border-border bg-muted/40 text-muted-foreground">
+          <div className="flex size-9 items-center justify-center rounded-lg border border-border bg-muted/40 text-foreground">
             <Icon className="size-[18px]" />
           </div>
           <div>

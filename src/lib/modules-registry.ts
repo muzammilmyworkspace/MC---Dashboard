@@ -1,15 +1,15 @@
+import { LayoutDashboard } from "lucide-react";
 import {
-  LayoutDashboard,
-  Search,
-  Megaphone,
-  LineChart,
-  LayoutTemplate,
-  Camera,
-  Contact,
-  MonitorPlay,
-  Music2,
-  type LucideIcon,
-} from "lucide-react";
+  InstagramIcon, FacebookIcon, MetaIcon, YouTubeIcon, TikTokIcon,
+  GoogleAdsIcon, GoogleAnalyticsIcon, LandingPagesIcon,
+} from "@/components/brand/platform-icons";
+
+/**
+ * Icons are plain components rather than LucideIcon, because the platform
+ * marks are inline SVG — lucide dropped brand icons in v1, and a generic
+ * camera standing in for Instagram made the nav harder to scan, not easier.
+ */
+export type ModuleIcon = React.ComponentType<{ size?: number; className?: string }>;
 
 /**
  * The eight things in the product, in one place.
@@ -21,7 +21,7 @@ import {
 export interface PlatformModule {
   href: string;
   name: string;
-  icon: LucideIcon;
+  icon: ModuleIcon;
   /** One plain-language line. Used on the card and the page header. */
   description: string;
   /** What the module will cover. Written as scope, not as promises about today. */
@@ -40,7 +40,7 @@ export const platformModules: PlatformModule[] = [
   {
     href: "/google",
     name: "Google",
-    icon: Search,
+    icon: GoogleAdsIcon,
     description: "Ads, Search Console and Workspace in one place.",
     capabilities: ["Campaign performance", "Search rankings & queries", "Budget pacing", "Conversion tracking"],
     integrationKey: "google-ads",
@@ -49,7 +49,7 @@ export const platformModules: PlatformModule[] = [
   {
     href: "/meta",
     name: "Meta",
-    icon: Megaphone,
+    icon: MetaIcon,
     description: "Ad spend, campaign performance and return on ad spend.",
     capabilities: ["Campaign performance", "Spend and ROAS", "Clicks, CTR and CPC", "Conversions"],
     integrationKey: "meta-graph",
@@ -58,7 +58,7 @@ export const platformModules: PlatformModule[] = [
   {
     href: "/facebook",
     name: "Facebook",
-    icon: Contact,
+    icon: FacebookIcon,
     description: "Page followers, reach and post performance.",
     capabilities: ["Page followers", "Post engagement", "Page reach", "Recent posts"],
     integrationKey: "meta-graph",
@@ -67,7 +67,7 @@ export const platformModules: PlatformModule[] = [
   {
     href: "/analytics",
     name: "Analytics",
-    icon: LineChart,
+    icon: GoogleAnalyticsIcon,
     description: "Traffic, engagement and conversions across the site.",
     capabilities: ["Sessions & users", "Traffic sources", "Conversion funnels", "Revenue attribution"],
     integrationKey: "ga4",
@@ -76,7 +76,7 @@ export const platformModules: PlatformModule[] = [
   {
     href: "/landing-pages",
     name: "Landing Pages",
-    icon: LayoutTemplate,
+    icon: LandingPagesIcon,
     description: "Page performance, forms and conversion rates.",
     capabilities: ["Page-level conversion rates", "Form submissions", "A/B test results", "Load performance"],
     integrationKey: null,
@@ -85,7 +85,7 @@ export const platformModules: PlatformModule[] = [
   {
     href: "/instagram",
     name: "Instagram",
-    icon: Camera,
+    icon: InstagramIcon,
     description: "Content, insights, comments and account management.",
     capabilities: ["Follower growth", "Post & reel performance", "Reach and engagement", "Comment management"],
     integrationKey: "instagram-graph",
@@ -94,7 +94,7 @@ export const platformModules: PlatformModule[] = [
   {
     href: "/youtube",
     name: "YouTube",
-    icon: MonitorPlay,
+    icon: YouTubeIcon,
     description: "Channel growth, video performance and audience retention.",
     capabilities: ["Subscriber growth", "Views & watch time", "Audience retention", "Comment management"],
     integrationKey: "youtube",
@@ -103,7 +103,7 @@ export const platformModules: PlatformModule[] = [
   {
     href: "/tiktok",
     name: "TikTok",
-    icon: Music2,
+    icon: TikTokIcon,
     description: "Video performance, followers and engagement.",
     capabilities: ["Follower growth", "Video views & completion", "Engagement rate", "Trending sounds"],
     integrationKey: "tiktok",

@@ -1,11 +1,11 @@
-import { Home, Settings, Plug, ServerCog, CalendarDays, type LucideIcon } from "lucide-react";
-import { dashboardModule, platformModules } from "./modules-registry";
+import { Home, Settings, Plug, ServerCog, CalendarDays } from "lucide-react";
+import { dashboardModule, platformModules, type ModuleIcon } from "./modules-registry";
 import { type Role } from "./data";
 
 export interface NavItem {
   label: string;
   href: string;
-  icon: LucideIcon;
+  icon: ModuleIcon;
   badge?: number;
 }
 
@@ -25,7 +25,7 @@ export const primaryNav: NavItem[] = [
  * screens live behind the profile menu or a direct link. Keeping them out of
  * the nav is what makes the nav readable.
  */
-export const secondaryMeta: Record<string, { label: string; icon: LucideIcon }> = {
+export const secondaryMeta: Record<string, { label: string; icon: ModuleIcon }> = {
   "/settings": { label: "Settings", icon: Settings },
   "/integrations": { label: "Integrations", icon: Plug },
   "/deployments": { label: "Deployment Center", icon: ServerCog },
@@ -33,7 +33,7 @@ export const secondaryMeta: Record<string, { label: string; icon: LucideIcon }> 
 };
 
 /** Every routable label, for breadcrumbs and the ⌘K palette. */
-export const itemMeta: Record<string, { label: string; icon: LucideIcon }> = {
+export const itemMeta: Record<string, { label: string; icon: ModuleIcon }> = {
   ...Object.fromEntries(primaryNav.map((i) => [i.href, { label: i.label, icon: i.icon }])),
   ...secondaryMeta,
 };
