@@ -327,6 +327,66 @@ export interface MetaMessagesResponse extends MetaMessagingReadiness {
   setupRequired: boolean;
 }
 
+
+/* ------------------------------- Meta Ads -------------------------------- */
+
+export interface AdAccount {
+  id: string; accountId: string; name: string;
+  status: number; statusLabel: string; currency: string; timezone: string | null;
+}
+
+export interface AdInsights {
+  spend: number | null; impressions: number | null; reach: number | null;
+  clicks: number | null; ctr: number | null; cpc: number | null; cpm: number | null;
+  frequency: number | null; conversions: number | null;
+  purchaseValue: number | null; roas: number | null;
+  dateStart: string | null; dateStop: string | null;
+}
+
+export interface AdCampaign {
+  id: string; name: string; status: string; objective: string | null; insights: AdInsights;
+}
+
+export interface AdsAvailability {
+  available: boolean; reason: string | null; accounts: AdAccount[];
+}
+
+export type AdDatePreset = "today" | "yesterday" | "last_7d" | "last_30d";
+
+/* ------------------------------- Facebook -------------------------------- */
+
+export interface FacebookPage {
+  id: string; name: string; category: string | null;
+  fanCount: number | null; followersCount: number | null; pictureUrl: string | null;
+  linkedInstagram: { id: string; username: string } | null;
+}
+
+/* ----------------------------- Daily report ------------------------------ */
+
+export interface DailyReportRow {
+  date: string;
+  followers: number | null;
+  gained: number | null;
+  lost: number | null;
+  /** Whether  was measured by Meta or estimated. */
+  lostSource: "measured" | "derived" | null;
+  net: number | null;
+  reach: number | null;
+  views: number | null;
+  profileViews: number | null;
+}
+
+export interface DailyReport {
+  configured: boolean;
+  message?: string;
+  rows: DailyReportRow[];
+  totals: {
+    gained: number; lost: number; net: number;
+    daysWithGainData: number; daysObserved: number;
+  } | null;
+  provenance?: Record<string, string>;
+}
+
 export interface IgDiagnostics {
   configured: boolean;
   missing: string[];
@@ -406,6 +466,20 @@ export const api = {
     metaHideComment: (commentId: string, hide: boolean) =>
       post<{ ok: boolean; hidden: boolean }>("/api/integrations/meta-graph/comments/hide", { commentId, hide }),
     metaMessages: () => get<MetaMessagesResponse>("/api/integrations/meta-graph/messages"),
+
+    /* --- Meta Ads (Marketing API) --------------------------------------- */
+    adAccounts: () => get<AdsAvailability>("/api/meta-ads/accounts"),
+    adInsights: (accountId: string, preset: AdDatePreset = "last_30d") =>
+      get<{ accountId: string; preset: string; insights: AdInsights }>(
+        `/api/meta-ads/insights?accountId=${encodeURIComponent(accountId)}&preset=${preset}`
+      ),
+    adCampaigns: (accountId: string, preset: AdDatePreset = "last_30d") =>
+      get<{ campaigns: AdCampaign[] }>(
+        `/api/meta-ads/campaigns?accountId=${encodeURIComponent(accountId)}&preset=${preset}`
+      ),
+
+    /* --- Facebook Pages -------------------------------------------------- */
+    facebookPages: () => get<{ pages: FacebookPage[] }>("/api/facebook/pages"),
   },
 
   instagram: {
@@ -422,6 +496,7 @@ export const api = {
         "/api/instagram/sync"
       ),
     diagnostics: () => get<IgDiagnostics>("/api/instagram/diagnostics"),
+    dailyReport: (days = 30) => get<DailyReport>(`/api/instagram/daily-report?days=${days}`),
   },
 
   dashboard: {

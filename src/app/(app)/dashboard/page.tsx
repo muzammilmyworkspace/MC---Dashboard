@@ -10,10 +10,11 @@ import {
 } from "lucide-react";
 import { platformModules } from "@/lib/modules-registry";
 import { usePlatformStatus } from "@/lib/platform-status";
-import { api, apiConfigProblem, type IgOverview } from "@/lib/api";
+import { api, apiConfigProblem, type AdInsights, type FacebookPage, type IgOverview } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/ui/status-dot";
+import { MetricCard } from "@/components/analytics/metric-card";
 import { cn, relativeTime } from "@/lib/utils";
 
 export default function DashboardPage() {
@@ -21,14 +22,30 @@ export default function DashboardPage() {
   const [ig, setIg] = useState<IgOverview | null>(null);
   const [igLoading, setIgLoading] = useState(true);
 
-  /* The one platform with live data. Everything shown below is measured. */
+  const [ads, setAds] = useState<{ insights: AdInsights; currency: string } | null>(null);
+  const [pages, setPages] = useState<FacebookPage[] | null>(null);
+
+  /* Headline figures for the three live platforms, fetched together. */
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const data = await api.instagram.overview(30).catch(() => null);
+      const [overview, adAccounts, fb] = await Promise.all([
+        api.instagram.overview(30).catch(() => null),
+        api.integrations.adAccounts().catch(() => null),
+        api.integrations.facebookPages().catch(() => null),
+      ]);
       if (cancelled) return;
-      setIg(data);
-      setIgLoading(false);
+
+      setIg(overview);
+      setPages(fb?.pages ?? null);
+
+      // One account is enough for an overview; the Meta page has the rest.
+      const first = adAccounts?.available ? adAccounts.accounts[0] : null;
+      if (first) {
+        const detail = await api.integrations.adInsights(first.id, "last_30d").catch(() => null);
+        if (!cancelled && detail) setAds({ insights: detail.insights, currency: first.currency });
+      }
+      if (!cancelled) setIgLoading(false);
     })();
     return () => {
       cancelled = true;
@@ -78,7 +95,38 @@ export default function DashboardPage() {
         </Card>
       )}
 
-      {/* Live platform spotlight */}
+      {/* Headline figures across the three live platforms. Deliberately only
+          the numbers a client asks about first — the detail lives on each
+          platform's own page. */}
+      <section className="space-y-3">
+        <h3 className="text-sm font-semibold">This month at a glance</h3>
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <MetricCard
+            label="Instagram followers" value={ig?.latest?.followers ?? null} loading={igLoading}
+            delta={ig?.totals?.net ?? null} deltaSuffix="in 30 days"
+            help="Total people following your Instagram account."
+            unavailable="Waiting for the first sync"
+          />
+          <MetricCard
+            label="Instagram reach" value={ig?.totals?.reach ?? null} loading={igLoading}
+            help="How many different people saw your Instagram content in the last 30 days."
+          />
+          <MetricCard
+            label="Ad spend" value={ads ? ads.insights.spend : null} loading={igLoading}
+            prefix={ads ? `${ads.currency} ` : undefined}
+            help="What you spent on Meta ads in the last 30 days."
+            unavailable="No ad account connected"
+          />
+          <MetricCard
+            label="Facebook followers"
+            value={pages?.length ? pages.reduce((s, p) => s + (p.followersCount ?? 0), 0) : null}
+            loading={igLoading}
+            help="Combined followers across all your Facebook Pages."
+            unavailable="No Pages connected"
+          />
+        </div>
+      </section>
+
       {igLoading ? (
         <Card className="h-56 animate-pulse bg-muted/40" />
       ) : ig?.configured && ig.latest ? (
