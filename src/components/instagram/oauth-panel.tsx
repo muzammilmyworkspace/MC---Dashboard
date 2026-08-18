@@ -12,6 +12,8 @@ import {
   type MetaInsightsResponse, type MetaMediaItem, type MetaMessagesResponse, type MetaProfileResponse,
 } from "@/lib/api";
 import { SectionCard, EmptyState, StatusPill } from "@/components/ui/page-shell";
+import { StatusDot } from "@/components/ui/status-dot";
+import { Tooltip } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -33,6 +35,8 @@ export function InstagramOAuthPanel() {
   const [loading, setLoading] = useState(true);
   const [apiError, setApiError] = useState<string | null>(null);
   const [needsLogin, setNeedsLogin] = useState(false);
+  /** The direct-token path — what actually powers the data on this page. */
+  const [direct, setDirect] = useState<{ connected: boolean; lastSyncAt: string | null } | null>(null);
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<Tab>("content");
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -68,7 +72,22 @@ export function InstagramOAuthPanel() {
     let cancelled = false;
     void (async () => {
       try {
-        const s = await api.integrations.metaStatus();
+        // Instagram can be connected two independent ways: a direct token
+        // (System User) or OAuth. Checking only OAuth reported the account as
+        // disconnected while its data was plainly on screen.
+        const [s, list] = await Promise.all([
+          api.integrations.metaStatus(),
+          api.integrations.list().catch(() => null),
+        ]);
+
+        const directRow = list?.integrations.find((i) => i.key === "instagram-graph");
+        if (!cancelled) {
+          setDirect(
+            directRow?.status === "CONNECTED"
+              ? { connected: true, lastSyncAt: directRow.lastSyncAt }
+              : { connected: false, lastSyncAt: null }
+          );
+        }
 
         let nextProfile: MetaProfileResponse | null = null;
         let nextCaps: MetaCapability[] = [];
@@ -191,8 +210,46 @@ export function InstagramOAuthPanel() {
   }
 
   if (!status.connected) {
+    /**
+     * The account is already connected by direct token — that is what the
+     * data on this page comes from. Showing "Not connected" here was simply
+     * wrong from the reader's point of view: OAuth is a second, optional way
+     * in, not the definition of being connected.
+     */
+    if (direct?.connected) {
+      return (
+        <SectionCard title="Instagram" icon={Plug} description="Account connection">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-success/10 text-success">
+                <Plug className="size-[18px]" />
+              </div>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-semibold">Instagram is connected</p>
+                  <StatusDot state="connected" label="Active" />
+                </div>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Your profile, posts and insights are syncing.
+                  {direct.lastSyncAt && ` Last updated ${new Date(direct.lastSyncAt).toLocaleString()}.`}
+                </p>
+              </div>
+            </div>
+
+            <Tooltip content="Signing in with Meta is an alternative way to connect. Your account is already connected, so this is optional.">
+              <span>
+                <Button variant="outline" size="sm" onClick={() => void connect()} disabled={busy}>
+                  <Plug className="size-4" /> {busy ? "Opening Meta…" : "Sign in with Meta"}
+                </Button>
+              </span>
+            </Tooltip>
+          </div>
+        </SectionCard>
+      );
+    }
+
     return (
-      <SectionCard title="Instagram via Meta login" icon={Plug} description="OAuth connection">
+      <SectionCard title="Instagram" icon={Plug} description="Account connection">
         <EmptyState
           icon={Plug}
           title="Instagram — Not connected"
