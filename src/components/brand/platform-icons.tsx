@@ -124,15 +124,27 @@ export function GoogleAnalyticsIcon({ size = 20, ...rest }: IconProps) {
 }
 
 export function LandingPagesIcon({ size = 20, ...rest }: IconProps) {
-  // No brand for this one — a neutral mark that matches the set's weight.
+  // The MC brand mark. Unlike the platform logos this one is ours, so it
+  // carries the brand gold rather than a neutral tone.
+  //
+  // Set as live text rather than traced outlines: a hand-traced serif M and C
+  // at this size would drift off the real letterforms, and Georgia/Times are
+  // present on effectively every system the dashboard runs on.
   return (
     <svg {...base(size)} {...rest}>
-      {/* Lighter than the brand marks on purpose — a filled logo here would
-          imply a platform that does not exist. */}
-      <rect x="3" y="4" width="18" height="16" rx="3.2" fill="currentColor" opacity="0.14" />
-      <rect x="3" y="4" width="18" height="16" rx="3.2" stroke="currentColor" strokeWidth="1.4" opacity="0.7" />
-      <path d="M3 8.9h18" stroke="currentColor" strokeWidth="1.4" opacity="0.7" />
-      <path d="M6.6 12.6h6.4M6.6 16.1h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" opacity="0.5" />
+      <rect x="1" y="1" width="22" height="22" rx="4.4" fill="#C0A05C" />
+      <text
+        x="12"
+        y="12.6"
+        textAnchor="middle"
+        dominantBaseline="central"
+        fontFamily="Georgia, 'Times New Roman', Times, serif"
+        fontSize="12.2"
+        letterSpacing="-0.4"
+        fill="#0A0A0A"
+      >
+        MC
+      </text>
     </svg>
   );
 }
