@@ -40,6 +40,21 @@ export interface InstagramBlock {
   latest: { date: string; newFollowers: number | null; unfollows: number | null; net: number | null } | null;
   /** Percentage change in followers across the window. */
   trendPct: number | null;
+  /**
+   * Daily follows/unfollows summed over the window.
+   *
+   * Counts only days where Meta published both halves, so the three figures
+   * describe the same set of days and add up: net === gained - lost.
+   */
+  followActivity: {
+    gained: number | null;
+    lost: number | null;
+    net: number | null;
+    daysCovered: number;
+    /** Newest and oldest day contributing, for labelling the window. */
+    from: string | null;
+    to: string | null;
+  };
   reach: number | null;
   profileViews: number | null;
   history: { date: string; followers: number | null; gained: number | null; lost: number | null; net: number | null }[];
@@ -91,6 +106,7 @@ async function instagramBlock(days: number): Promise<InstagramBlock> {
   const empty: InstagramBlock = {
     available: false, username: null, followers: null, following: null, contentCount: null,
     latest: null, trendPct: null, reach: null, profileViews: null,
+    followActivity: { gained: null, lost: null, net: null, daysCovered: 0, from: null, to: null },
     history: [], topContent: [], lastSyncAt: null,
   };
   if (!isConfigured() || !env.IG_BUSINESS_ACCOUNT_ID) return empty;
@@ -107,8 +123,14 @@ async function instagramBlock(days: number): Promise<InstagramBlock> {
   ]);
 
   const observed = history.filter((h) => h.followers !== null);
-  const first = observed[0];
   const last = observed.at(-1);
+
+  // A day contributes only when Meta published both halves — a day with
+  // follows but no unfollows would inflate the net.
+  const paired = history.filter((h) => h.gained !== null && h.lost !== null);
+  const gainedTotal = paired.reduce((s, h) => s + (h.gained ?? 0), 0);
+  const lostTotal = paired.reduce((s, h) => s + (h.lost ?? 0), 0);
+  const netTotal = gainedTotal - lostTotal;
 
   // The newest day Meta has actually published follow figures for. Its data
   // runs about two days behind, so the final row is usually still empty.
@@ -158,10 +180,30 @@ async function instagramBlock(days: number): Promise<InstagramBlock> {
               : latestWithFollowData.net,
         }
       : null,
-    trendPct:
-      first?.followers && last?.followers && first.followers > 0
-        ? Number((((last.followers - first.followers) / first.followers) * 100).toFixed(1))
-        : null,
+    /**
+     * Growth across the window, derived from the measured daily pair rather
+     * than from two follower snapshots.
+     *
+     * Snapshots exist only for days the sync ran — usually three or four —
+     * so comparing the first to the last described a few days while every
+     * other figure on the card described thirty. Working back from today's
+     * count using the measured net covers the whole window.
+     */
+    trendPct: (() => {
+      const current = profile?.followers_count ?? last?.followers ?? null;
+      if (current === null || paired.length === 0) return null;
+      const startOfWindow = current - netTotal;
+      if (startOfWindow <= 0) return null;
+      return Number(((netTotal / startOfWindow) * 100).toFixed(1));
+    })(),
+    followActivity: {
+      gained: paired.length ? gainedTotal : null,
+      lost: paired.length ? lostTotal : null,
+      net: paired.length ? netTotal : null,
+      daysCovered: paired.length,
+      from: paired[0]?.date ?? null,
+      to: paired.at(-1)?.date ?? null,
+    },
     reach: history.reduce((s, h) => s + (h.reach ?? 0), 0) || null,
     profileViews: history.reduce((s, h) => s + (h.profileViews ?? 0), 0) || null,
     history: history.map((h) => ({ date: h.date, followers: h.followers, gained: h.gained, lost: h.lost, net: h.net })),

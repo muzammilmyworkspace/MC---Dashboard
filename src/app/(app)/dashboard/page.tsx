@@ -6,6 +6,7 @@ import { motion } from "framer-motion";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip as RTooltip, XAxis, YAxis } from "recharts";
 import { ArrowRight, ArrowUpRight, ArrowDownRight, RefreshCw, CheckCircle2, AlertTriangle, Info, ExternalLink } from "lucide-react";
 import { InstagramIcon, FacebookIcon, MetaIcon } from "@/components/brand/platform-icons";
+import { FollowerActivityCard } from "@/components/dashboard/follower-activity";
 import { moduleFor } from "@/lib/modules-registry";
 import { api, ApiRequestError } from "@/lib/api";
 import type { DashboardOverview } from "@/lib/dashboard-types";
@@ -48,6 +49,13 @@ export default function DashboardPage() {
   const ig = data?.instagram;
   const fb = data?.facebook;
   const ads = data?.ads;
+
+  /** "Aug 17" — the day the latest follow figures belong to, never today. */
+  const latestDayLabel = ig?.latest?.date
+    ? new Date(`${ig.latest.date}T00:00:00Z`).toLocaleDateString(undefined, {
+        month: "short", day: "numeric", timeZone: "UTC",
+      })
+    : null;
 
   return (
     <motion.div
@@ -103,10 +111,10 @@ export default function DashboardPage() {
           headline={ig?.followers ?? null} headlineLabel="Followers"
           trendPct={ig?.trendPct ?? null} windowDays={days}
           rows={[
-            { label: "New followers", value: ig?.latest?.newFollowers ?? null, tone: "good", help: "People who started following on the most recent day Meta has published." },
-            { label: "Unfollowed", value: ig?.latest?.unfollows ?? null, tone: "bad", help: "People who stopped following. Reported directly by Meta." },
-            { label: "Net growth", value: ig?.latest?.net ?? null, tone: "net", help: "New followers minus unfollows on that day." },
-            { label: "Content", value: ig?.contentCount ?? null, help: "Total posts and reels published on this account." },
+            { label: latestDayLabel ? `New followers · ${latestDayLabel}` : "New followers", value: ig?.latest?.newFollowers ?? null, tone: "good", help: "People who started following on the most recent day Meta has published. Meta reports this about two days behind, so it is never today." },
+            { label: latestDayLabel ? `Unfollowed · ${latestDayLabel}` : "Unfollowed", value: ig?.latest?.unfollows ?? null, tone: "bad", help: "People who stopped following that day. Meta reports how many, never who." },
+            { label: "Net that day", value: ig?.latest?.net ?? null, tone: "net", help: "New followers minus unfollows on that day." },
+            { label: `Net · ${days} days`, value: ig?.followActivity.net ?? null, tone: "net", emphasis: true, help: "New followers minus unfollows across the whole window." },
           ]}
         />
 
@@ -142,7 +150,7 @@ export default function DashboardPage() {
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h2 className="text-sm font-semibold">Performance overview</h2>
-            <p className="text-xs text-muted-foreground">Follower growth over time.</p>
+            <p className="text-xs text-muted-foreground">Follower growth, and the daily follows and unfollows behind it.</p>
           </div>
           <div className="flex items-center rounded-lg border border-border bg-card p-0.5">
             {([7, 30, 90] as Window[]).map((w) => (
@@ -160,6 +168,12 @@ export default function DashboardPage() {
           </div>
         </div>
         <GrowthChart history={ig?.history ?? []} loading={loading} />
+        <FollowerActivityCard
+          history={ig?.history ?? []}
+          totals={ig?.followActivity ?? { gained: null, lost: null, net: null, daysCovered: 0 }}
+          windowDays={days}
+          loading={loading}
+        />
       </section>
 
       {/* Content + advertising */}
