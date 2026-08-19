@@ -169,7 +169,16 @@ export function InstagramDashboard() {
               deltaSuffix={`in ${days}d`}
             />
             <Kpi label="Gained" value={totals?.gained.toLocaleString() ?? "—"} icon={TrendingUp} tone="success" />
-            <Kpi label="Unfollowed" value={totals?.lost.toLocaleString() ?? "—"} icon={TrendingDown} tone="danger" estimated />
+            <Kpi
+              label="Unfollowed"
+              value={totals?.lost.toLocaleString() ?? "—"}
+              icon={TrendingDown}
+              tone="danger"
+              // Only flagged when a day in the window really is the old
+              // estimate. Labelling Meta's measured figure "Estimated" told
+              // the reader to distrust a number that is exact.
+              estimated={overview?.history.some((d) => d.lostSource === "derived") ?? false}
+            />
             <Kpi label="Reach" value={totals?.reach ? compact(totals.reach) : "—"} icon={Eye} />
             <Kpi label="Profile views" value={totals?.profileViews ? compact(totals.profileViews) : "—"} icon={Eye} />
           </div>
@@ -231,15 +240,16 @@ export function InstagramDashboard() {
           {/* --------------------- Gained vs unfollowed -------------------- */}
           <SectionCard
             title="Daily follows vs unfollows"
-            description="Green is new follows reported by Meta. Red is unfollows — derived, not reported."
+            description="Both figures come straight from Meta — follows in green, unfollows in red."
             icon={Users}
           >
             <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-accent/25 bg-accent/[0.06] p-3">
               <Info className="mt-0.5 size-4 shrink-0 text-accent" />
               <p className="text-xs text-muted-foreground">
-                Meta does not publish unfollows, or who unfollowed — no API returns that. We calculate it as{" "}
-                <strong className="text-foreground">new follows − net change</strong> from our own daily snapshots, so
-                treat it as a close estimate rather than an exact figure.
+                These are Meta&apos;s own measured counts, not estimates. Meta publishes{" "}
+                <strong className="text-foreground">how many</strong> people followed and unfollowed each day, but never{" "}
+                <strong className="text-foreground">who</strong> — no Instagram API returns the identity of an
+                unfollower, so a named list cannot be built. Figures settle about two days after the day itself.
               </p>
             </div>
 

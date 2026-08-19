@@ -251,8 +251,14 @@ export interface IgFollowerDay {
   net: number | null;
   /** Gross new follows, reported by Meta. */
   gained: number | null;
-  /** Derived (gained − net) — Meta never reports unfollows directly. */
+  /** Unfollows. Measured by Meta where available — see lostSource. */
   lost: number | null;
+  /**
+   * Where `lost` came from. "measured" is Meta's own follows_and_unfollows
+   * figure; "derived" is the old (gained − net) estimate, kept only for rows
+   * recorded before that metric was wired up.
+   */
+  lostSource: "measured" | "derived" | null;
   reach: number | null;
   views: number | null;
   profileViews: number | null;

@@ -125,9 +125,25 @@ export async function syncInstagram(trigger = "manual"): Promise<SyncResult> {
            derived, so the report can state them as fact. Meta usually has no
            data for the current day until it closes, hence yesterday too. */
     // Meta's follow/unfollow data lags roughly two days, so a today-and-
-    // yesterday window finds nothing. Seven days costs seven calls once a day
-    // and also repairs any run that was missed.
-    const activityDays = Array.from({ length: 7 }, (_, i) => dayKey(new Date(Date.now() - i * 86_400_000)));
+    // yesterday window finds nothing.
+    //
+    // Thirty days, not seven. Probing the API showed it serves this metric for
+    // at least 32 days back, and the shorter window left older days holding a
+    // follows figure with no unfollows beside it — a half-filled row the chart
+    // could only draw as a one-sided bar.
+    //
+    // It also repairs history. Rows written before the date convention was
+    // fixed are shifted a day late, and since this endpoint is authoritative
+    // for both halves, re-reading the full window overwrites them with the
+    // figures Meta actually reports for each date.
+    // 33, not 30: probing showed Meta still serves this metric at 32 days
+    // back, and the window has to reach at least as far as the retention or a
+    // row can age out still holding a pre-fix value. Days beyond retention
+    // simply return nothing and are skipped, so overshooting is free.
+    const ACTIVITY_BACKFILL_DAYS = 33;
+    const activityDays = Array.from({ length: ACTIVITY_BACKFILL_DAYS }, (_, i) =>
+      dayKey(new Date(Date.now() - i * 86_400_000))
+    );
 
     for (const target of activityDays) {
       try {
