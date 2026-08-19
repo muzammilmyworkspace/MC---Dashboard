@@ -12,14 +12,15 @@ export const dynamic = "force-dynamic";
  * What each column actually is, because the distinction is the whole point:
  *
  *   followers — measured. Read from the profile at snapshot time.
- *   gained    — measured. Meta's `follower_count` insight: gross new follows
- *               that day. Verified live, returning real values.
- *   net       — measured. Difference between two of our own snapshots.
- *   lost      — DERIVED, not reported. Meta publishes no unfollow figure at
- *               any permission level, so this is gained − net, clamped at 0.
+ *   gained    — measured. Meta's follows_and_unfollows insight, FOLLOWER
+ *               breakdown: gross new follows that day.
+ *   lost      — measured. The same insight's NON_FOLLOWER breakdown. Meta
+ *               does publish this; rows recorded before it was wired up
+ *               still carry the old (gained − net) estimate and say so.
+ *   net       — measured. gained − lost across the days that have both.
  *
- * The response labels `lost` as derived so the UI can never present it as a
- * measured number.
+ * Provenance is reported per row rather than asserted for the whole column,
+ * because within one window some days can be measured and others estimated.
  */
 export async function GET(req: Request) {
   const auth = await requireAuth(req);
@@ -52,6 +53,12 @@ export async function GET(req: Request) {
   const measured = rows.filter((r) => r.gained !== null);
   const observed = rows.filter((r) => r.followers !== null);
 
+  // Both halves must be present for a day to contribute to a total, so the
+  // three figures describe the same set of days and can be added up by hand.
+  const paired = rows.filter((r) => r.gained !== null && r.lost !== null);
+  const gainedTotal = paired.reduce((s, r) => s + (r.gained ?? 0), 0);
+  const lostTotal = paired.reduce((s, r) => s + (r.lost ?? 0), 0);
+
   return NextResponse.json({
     configured: true,
     range: from && to ? { from, to } : { days },
@@ -59,22 +66,28 @@ export async function GET(req: Request) {
     totals: {
       // Only sum days that actually have the figure; a partial window must
       // not read as a confident zero.
-      gained: measured.reduce((s, r) => s + (r.gained ?? 0), 0),
-      lost: measured.reduce((s, r) => s + (r.lost ?? 0), 0),
-      net:
-        observed.length > 1
-          ? (observed[0].followers ?? 0) - (observed[observed.length - 1].followers ?? 0)
-          : 0,
+      gained: gainedTotal,
+      lost: lostTotal,
+      /**
+       * gained − lost, not the gap between the first and last snapshot.
+       *
+       * Snapshots exist only for days the sync ran, so that gap covered a
+       * few days while gained and lost covered the whole window — three
+       * headline numbers that could not be reconciled with one another.
+       */
+      net: gainedTotal - lostTotal,
       daysWithGainData: measured.length,
       daysObserved: observed.length,
+      daysPaired: paired.length,
     },
-    /** Tells the UI which columns are measured and which are inferred. */
+    /** Column-level provenance; individual rows carry their own lostSource. */
     provenance: {
       followers: "measured",
       gained: "measured",
       net: "measured",
-      lost: "derived",
-      note: "Meta publishes no unfollow figure. `lost` is gained − net change, clamped at zero, and is an estimate.",
+      // Measured unless some row in this window predates the metric.
+      lost: rows.some((r) => r.lostSource === "derived") ? "mixed" : "measured",
+      note: "Meta reports how many people followed and unfollowed each day, but never who. Figures settle about two days after the day itself.",
       source: "Instagram Graph API",
     },
   });

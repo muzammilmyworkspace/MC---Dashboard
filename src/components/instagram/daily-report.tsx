@@ -46,7 +46,27 @@ export function InstagramDailyReport() {
 
   const rows = report?.rows ?? [];
   const today = rows[0];
-  const yesterday = rows[1];
+
+  /**
+   * The newest day Meta has actually published follow figures for.
+   *
+   * Rows are newest-first, and Meta runs about two days behind, so the top
+   * two rows are normally empty. Looking only at today and yesterday — which
+   * is what this did — meant the cards read "—" permanently even though the
+   * figures were sitting one row further down. A complete day is preferred so
+   * the pair belongs together; a half day is a last resort.
+   */
+  const latestFollowDay =
+    rows.find((r) => r.gained !== null && r.lost !== null) ??
+    rows.find((r) => r.gained !== null || r.lost !== null) ??
+    null;
+
+  /** "Aug 17" — the cards must say which day they describe. */
+  const followDayLabel = latestFollowDay
+    ? new Date(`${latestFollowDay.date}T00:00:00Z`).toLocaleDateString(undefined, {
+        month: "short", day: "numeric", timeZone: "UTC",
+      })
+    : null;
 
   // Oldest first for the chart; newest first reads better in the table.
   const chart = rows
@@ -85,19 +105,24 @@ export function InstagramDailyReport() {
           unavailable="Waiting for the first daily sync"
         />
         <MetricCard
-          label="New followers" value={today?.gained ?? yesterday?.gained ?? null} loading={stale}
-          help="People who started following on the most recent day with data. Meta reports this figure roughly two days behind."
-          unavailable="Meta hasn't published this day yet"
+          label={followDayLabel ? `New followers · ${followDayLabel}` : "New followers"}
+          value={latestFollowDay?.gained ?? null}
+          loading={stale}
+          help="People who started following on the most recent day Meta has published. Meta reports this about two days behind, so it is never today."
+          unavailable="No published day in this range yet"
         />
         <MetricCard
-          label="Unfollows" value={today?.lost ?? yesterday?.lost ?? null} loading={stale} inverse
-          provenance={(today?.lostSource ?? yesterday?.lostSource) === "derived" ? "derived" : "measured"}
-          help="People who stopped following. Meta reports this directly."
-          unavailable="Meta hasn't published this day yet"
+          label={followDayLabel ? `Unfollows · ${followDayLabel}` : "Unfollows"}
+          value={latestFollowDay?.lost ?? null}
+          loading={stale}
+          inverse
+          provenance={latestFollowDay?.lostSource === "derived" ? "derived" : "measured"}
+          help="People who stopped following that day. Meta reports how many, never who — no Instagram API returns an unfollower's identity."
+          unavailable="No published day in this range yet"
         />
         <MetricCard
           label="Net growth" value={report?.totals?.net ?? null} loading={stale}
-          help={`New followers minus unfollows across ${range.label.toLowerCase()}.`}
+          help={`New followers minus unfollows across ${range.label.toLowerCase()}, counting only the days Meta has published.`}
           unavailable="Needs two days of history"
         />
       </div>
