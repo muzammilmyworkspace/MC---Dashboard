@@ -1,5 +1,5 @@
-import { ModulePage } from "@/components/modules/module-page";
+import { LandingPagesScreen } from "@/components/landing-pages/landing-pages-screen";
 
 export default function Page() {
-  return <ModulePage href="/landing-pages" />;
+  return <LandingPagesScreen />;
 }

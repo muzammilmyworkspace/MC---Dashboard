@@ -111,6 +111,7 @@ model User {
   createdTasks  Task[]         @relation("TaskCreator")
 
   @@index([role])
+  landingPages LandingPage[]
 }
 
 /* -------------------------------- Tasks -------------------------------- */
@@ -571,4 +572,71 @@ model AuditLog {
 
   @@index([entity, entityId])
   @@index([createdAt])
+}
+
+/* ----------------------------- Landing Pages ------------------------------ */
+
+enum LandingPageSource {
+  VERCEL
+  MANUAL
+}
+
+enum LandingPageStatus {
+  LIVE
+  BUILDING
+  QUEUED
+  FAILED
+  CANCELED
+  UNKNOWN
+}
+
+/**
+ * A landing page the team chose to track.
+ *
+ * Deliberately NOT the same table as Project: the Deployment Center mirrors
+ * everything a provider reports, whereas this list is hand-picked and must
+ * never grow on its own. Keeping them apart is what stops a Vercel sync from
+ * silently populating the client-facing screen.
+ *
+ * Vercel stays the source of truth for deployment state. Only the reference
+ * and a cached copy of the last known state live here, so the dashboard can
+ * render instantly and survive a Vercel outage. No credential is ever stored
+ * on this row.
+ */
+model LandingPage {
+  id     String            @id @default(cuid())
+  name   String
+  source LandingPageSource @default(VERCEL)
+
+  /** Null for manually added pages. Unique so re-importing is idempotent. */
+  vercelProjectId String? @unique
+  /** Vercel's own project name, shown so the client can find it in Vercel. */
+  vercelProjectName String @default("")
+
+  productionUrl String  @default("")
+  previewUrl    String  @default("")
+  deploymentId  String?
+
+  status      LandingPageStatus @default(UNKNOWN)
+  framework   String            @default("")
+  environment String            @default("production")
+  description String            @default("")
+
+  lastDeploymentAt DateTime?
+  lastSyncedAt     DateTime?
+
+  /**
+   * Every row in this table is by definition selected — the column exists
+   * because the spec calls for it, and it allows hiding a page without
+   * losing its history.
+   */
+  isSelected Boolean @default(true)
+
+  createdById String?
+  createdBy   User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isSelected, createdAt])
 }

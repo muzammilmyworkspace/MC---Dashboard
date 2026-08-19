@@ -150,6 +150,68 @@ async function tryRefresh(): Promise<boolean> {
 const get = <T>(p: string) => raw<T>(p);
 const post = <T>(p: string, body?: unknown) => raw<T>(p, { method: "POST", body: body ? JSON.stringify(body) : undefined });
 const patch = <T>(p: string, body?: unknown) => raw<T>(p, { method: "PATCH", body: body ? JSON.stringify(body) : undefined });
+const del = <T>(p: string) => raw<T>(p, { method: "DELETE" });
+
+/* ---------------------------- landing pages ------------------------------ */
+
+export type LandingPageStatus = "LIVE" | "BUILDING" | "QUEUED" | "FAILED" | "CANCELED" | "UNKNOWN";
+
+export interface LandingPage {
+  id: string;
+  name: string;
+  source: "VERCEL" | "MANUAL";
+  vercelProjectId: string | null;
+  vercelProjectName: string;
+  productionUrl: string;
+  previewUrl: string;
+  deploymentId: string | null;
+  status: LandingPageStatus;
+  framework: string;
+  environment: string;
+  description: string;
+  lastDeploymentAt: string | null;
+  lastSyncedAt: string | null;
+  createdAt: string;
+}
+
+export interface VercelAvailableProject {
+  vercelProjectId: string;
+  name: string;
+  productionUrl: string;
+  framework: string;
+  status: LandingPageStatus;
+  environment: string;
+  deploymentId: string | null;
+  lastDeploymentAt: string | null;
+}
+
+export interface VercelAvailability {
+  configured: boolean;
+  missingEnv: string[];
+  projects: VercelAvailableProject[];
+  alreadyImported: string[];
+}
+
+export interface VercelConnectionResult {
+  ok: boolean;
+  message: string;
+  account: string | null;
+  teamScoped: boolean;
+  missingEnv: string[];
+}
+
+export interface VercelDeploymentRecord {
+  id: string;
+  url: string | null;
+  status: LandingPageStatus;
+  environment: "production" | "preview";
+  createdAt: string | null;
+  durationMs: number | null;
+  commitSha: string | null;
+  commitMessage: string | null;
+  branch: string | null;
+  creator: string | null;
+}
 
 /* ------------------------------ endpoints ------------------------------- */
 
@@ -436,6 +498,24 @@ export const api = {
     ) => patch<{ plan: ApiDayPlan }>(`/api/day-plans/${date}`, body),
     review: (date: string, status: "APPROVED" | "REJECTED" | "CHANGES" | "COMMENT", comment = "") =>
       post<{ plan: ApiDayPlan }>(`/api/day-plans/${date}/reviews`, { status, comment }),
+  },
+
+  landingPages: {
+    list: () => get<{ pages: LandingPage[]; vercelConfigured: boolean }>("/api/landing-pages"),
+    vercelProjects: () => get<VercelAvailability>("/api/landing-pages/vercel/projects"),
+    testVercel: () => post<VercelConnectionResult>("/api/landing-pages/vercel/test"),
+    import: (vercelProjectIds: string[]) =>
+      post<{ imported: number; skipped: number; pages: LandingPage[] }>("/api/landing-pages/import", { vercelProjectIds }),
+    /** No ids refreshes every tracked page; ids refresh just those cards. */
+    sync: (ids?: string[]) =>
+      post<{ refreshed: number; failed: number; pages: LandingPage[] }>("/api/landing-pages/sync", ids ? { ids } : {}),
+    createManual: (body: { name: string; productionUrl: string; description?: string; status?: LandingPageStatus }) =>
+      post<{ page: LandingPage }>("/api/landing-pages", body),
+    update: (id: string, body: Partial<Pick<LandingPage, "name" | "description" | "productionUrl" | "previewUrl" | "status">>) =>
+      patch<{ page: LandingPage }>(`/api/landing-pages/${id}`, body),
+    remove: (id: string) => del<{ removed: boolean; id: string }>(`/api/landing-pages/${id}`),
+    deployments: (id: string) =>
+      get<{ deployments: VercelDeploymentRecord[]; reason: string | null }>(`/api/landing-pages/${id}/deployments`),
   },
 
   integrations: {

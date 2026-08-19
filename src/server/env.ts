@@ -42,6 +42,16 @@ const schema = z.object({
   /** Shared secret proving a request came from Vercel Cron. */
   CRON_SECRET: z.string().optional(),
 
+  // --- Vercel (Landing Pages) -----------------------------------------
+  /**
+   * Read-only Vercel API token. Optional on purpose: the Landing Pages
+   * screen has to render a setup guide rather than 500 when it is absent.
+   */
+  VERCEL_TOKEN: z.string().optional(),
+  /** Only needed when the projects live under a team rather than a personal account. */
+  VERCEL_TEAM_ID: z.string().optional(),
+  VERCEL_API_URL: z.string().default("https://api.vercel.com"),
+
   /** How long provider responses stay cached. */
   DEPLOY_CACHE_TTL_MS: z.coerce.number().default(60_000),
 });
@@ -67,6 +77,7 @@ export const env = parsed.success
       ACCESS_TOKEN_TTL: process.env.ACCESS_TOKEN_TTL ?? "15m",
       REFRESH_TOKEN_TTL_DAYS: Number(process.env.REFRESH_TOKEN_TTL_DAYS ?? 30),
       IG_MEDIA_LIMIT: Number(process.env.IG_MEDIA_LIMIT ?? 50),
+      VERCEL_API_URL: process.env.VERCEL_API_URL ?? "https://api.vercel.com",
     } as unknown as z.infer<typeof schema>);
 
 export const isProd = env.NODE_ENV === "production";

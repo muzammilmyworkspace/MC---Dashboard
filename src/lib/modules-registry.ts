@@ -77,10 +77,10 @@ export const platformModules: PlatformModule[] = [
     href: "/landing-pages",
     name: "Landing Pages",
     icon: LandingPagesIcon,
-    description: "Page performance, forms and conversion rates.",
-    capabilities: ["Page-level conversion rates", "Form submissions", "A/B test results", "Load performance"],
+    description: "Live pages, deployment status and history from Vercel.",
+    capabilities: ["Deployment status", "Production URLs", "Deployment history", "Manual page tracking"],
     integrationKey: null,
-    live: false,
+    live: true,
   },
   {
     href: "/instagram",
