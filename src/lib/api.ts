@@ -213,6 +213,62 @@ export interface VercelDeploymentRecord {
   creator: string | null;
 }
 
+/* -------------------------- instagram analytics -------------------------- */
+
+export type IgGranularity = "daily" | "weekly" | "monthly";
+export type IgProvenance = "measured" | "derived" | "unavailable";
+
+export interface IgBucket {
+  key: string; label: string; startDate: string; endDate: string;
+  followers: number | null; newFollowers: number | null; unfollows: number | null; netGrowth: number | null;
+  reach: number | null; views: number | null; profileViews: number | null; websiteClicks: number | null;
+  accountsEngaged: number | null; totalInteractions: number | null;
+  likes: number | null; comments: number | null; shares: number | null; saves: number | null; replies: number | null;
+  posts: number; reels: number; carousels: number; stories: number;
+  engagementRate: number | null;
+}
+
+export interface IgContentItem {
+  id: string; type: "Reel" | "Carousel" | "Post"; caption: string; permalink: string;
+  thumbnailUrl: string | null; timestamp: string;
+  reach: number | null; views: number | null; likes: number; comments: number;
+  shares: number | null; saves: number | null; totalInteractions: number | null;
+  engagementRate: number | null; avgWatchTimeMs: number | null;
+  profileVisits: number | null; followsFromPost: number | null;
+}
+
+export interface IgGroupStats {
+  count: number; reach: number | null; views: number | null; likes: number; comments: number;
+  shares: number | null; saves: number | null; totalInteractions: number | null;
+  avgReach: number | null; avgViews: number | null; engagementRate: number | null;
+}
+
+export interface IgAnalytics {
+  configured: boolean;
+  message?: string;
+  range: { startDate: string; endDate: string; granularity: IgGranularity; days: number };
+  profile: { username: string | null; followers: number | null; following: number | null; contentCount: number | null } | null;
+  followerChange: { net: number | null; percent: number | null };
+  totals: {
+    newFollowers: number | null; unfollows: number | null; netGrowth: number | null;
+    reach: number | null; views: number | null; profileViews: number | null; websiteClicks: number | null;
+    accountsEngaged: number | null; totalInteractions: number | null;
+    likes: number | null; comments: number | null; shares: number | null; saves: number | null; replies: number | null;
+    engagementRate: number | null; daysWithFollowData: number; daysInRange: number;
+  };
+  buckets: IgBucket[];
+  content: { total: number; reels: number; carousels: number; posts: number; stories: number };
+  reels: IgGroupStats;
+  posts: IgGroupStats;
+  stories: { published: number; reach: number | null; views: number | null; replies: number | null; navigation: number | null; totalInteractions: number | null };
+  topContent: IgContentItem[];
+  needsAttention: IgContentItem[];
+  publishing: { byWeekday: { weekday: number; label: string; posts: number; reels: number; total: number }[]; perDay: number | null; perWeek: number | null };
+  provenance: Record<string, IgProvenance>;
+  lastSyncAt: string | null;
+  pendingDays: number;
+}
+
 /* ------------------------------ endpoints ------------------------------- */
 
 export interface ApiDayPlan {
@@ -572,6 +628,10 @@ export const api = {
 
   instagram: {
     overview: (days = 30) => get<IgOverview>(`/api/instagram/overview?days=${days}`),
+    analytics: (startDate: string, endDate: string, granularity: IgGranularity = "daily") =>
+      get<IgAnalytics>(
+        `/api/instagram/analytics?startDate=${startDate}&endDate=${endDate}&granularity=${granularity}`
+      ),
     followers: (days = 30) => get<{ history: IgFollowerDay[] }>(`/api/instagram/followers?days=${days}`),
     media: (limit = 24, type: "ALL" | "FEED" | "REELS" | "STORY" = "ALL") =>
       get<{ media: IgMediaItem[] }>(`/api/instagram/media?limit=${limit}&type=${type}`),

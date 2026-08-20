@@ -323,6 +323,9 @@ export interface MediaInsights {
   shares?: number;
   totalInteractions?: number;
   avgWatchTimeMs?: number;
+  /** FEED only — Meta rejects these two on reels. */
+  profileVisits?: number;
+  follows?: number;
 }
 
 /** Valid metrics differ per media type — asking for the wrong one is a hard error. */
@@ -330,8 +333,10 @@ function metricsFor(productType: string): string {
   if (productType === "REELS") {
     return "reach,views,saved,shares,total_interactions,ig_reels_avg_watch_time";
   }
-  if (productType === "STORY") return "reach,views,replies";
-  return "reach,views,saved,shares,total_interactions";
+  if (productType === "STORY") return "reach,views,replies,navigation,total_interactions";
+  // profile_visits and follows exist only on feed posts — asking for them on
+  // a reel is a hard error, which is why the split is per product type.
+  return "reach,views,saved,shares,total_interactions,profile_visits,follows";
 }
 
 export async function getMediaInsights(
@@ -357,6 +362,8 @@ export async function getMediaInsights(
       shares: val("shares"),
       totalInteractions: val("total_interactions"),
       avgWatchTimeMs: val("ig_reels_avg_watch_time"),
+      profileVisits: val("profile_visits"),
+      follows: val("follows"),
     };
   } catch (err) {
     // Insights expire for stories after 24h and aren't available on very
@@ -493,4 +500,149 @@ export async function discoverAccounts(): Promise<
     igAccountId: p.instagram_business_account?.id ?? null,
     igUsername: p.instagram_business_account?.username ?? null,
   }));
+}
+
+/* ------------------- Account-wide daily totals (measured) ---------------- */
+
+export interface DayTotals {
+  views: number | null;
+  reach: number | null;
+  profileViews: number | null;
+  accountsEngaged: number | null;
+  totalInteractions: number | null;
+  websiteClicks: number | null;
+  likes: number | null;
+  comments: number | null;
+  shares: number | null;
+  saves: number | null;
+  replies: number | null;
+}
+
+const EMPTY_DAY: DayTotals = {
+  views: null, reach: null, profileViews: null, accountsEngaged: null,
+  totalInteractions: null, websiteClicks: null, likes: null, comments: null,
+  shares: null, saves: null, replies: null,
+};
+
+/**
+ * Every account-wide metric for one day, in a single request.
+ *
+ * Each of these was confirmed available on this account by probing the API
+ * one metric at a time — `impressions` is absent because Meta removed it,
+ * not because it was overlooked.
+ *
+ * They are fetched per day rather than as a range because `total_value`
+ * collapses a range into one figure, which cannot be broken back down. One
+ * call per day is the only way to get a daily series, and eleven metrics
+ * ride along in each call.
+ */
+export async function getDayTotals(day: string, cfg = igConfig()): Promise<DayTotals> {
+  const since = Math.floor(new Date(`${day}T00:00:00.000Z`).getTime() / 1000);
+
+  try {
+    const res = await graph<{ data: TotalValueInsight[] }>(
+      `${cfg.igAccountId}/insights`,
+      {
+        metric:
+          "views,reach,profile_views,accounts_engaged,total_interactions,website_clicks,likes,comments,shares,saves,replies",
+        metric_type: "total_value",
+        period: "day",
+        since,
+        until: since + 86_400,
+      },
+      cfg,
+      // Closed days never change, so they cache well; the running day is
+      // re-read on the next sync anyway.
+      300_000
+    );
+
+    const by = new Map((res.data ?? []).map((m) => [m.name, m.total_value?.value]));
+    const pick = (k: string) => (by.has(k) ? by.get(k) ?? null : null);
+
+    return {
+      views: pick("views"),
+      reach: pick("reach"),
+      profileViews: pick("profile_views"),
+      accountsEngaged: pick("accounts_engaged"),
+      totalInteractions: pick("total_interactions"),
+      websiteClicks: pick("website_clicks"),
+      likes: pick("likes"),
+      comments: pick("comments"),
+      shares: pick("shares"),
+      saves: pick("saves"),
+      replies: pick("replies"),
+    };
+  } catch (err) {
+    console.warn(`[instagram] day totals for ${day}: ${(err as Error).message}`);
+    return { ...EMPTY_DAY };
+  }
+}
+
+/* --------------------------------- Stories ------------------------------- */
+
+export interface StoryItem {
+  id: string;
+  mediaType: string;
+  permalink: string;
+  timestamp: string;
+  reach: number | null;
+  views: number | null;
+  replies: number | null;
+  navigation: number | null;
+  totalInteractions: number | null;
+}
+
+/**
+ * Currently-live stories with their insights.
+ *
+ * Instagram only exposes stories from the last 24 hours — there is no way to
+ * ask for older ones — so this returns what exists right now and the caller
+ * persists it. Anything not captured before a story expires is gone for good.
+ *
+ * `exits`, `taps_forward` and `taps_back` are not requested: Meta rejects
+ * them on this API version.
+ */
+export async function getStories(cfg = igConfig()): Promise<StoryItem[]> {
+  try {
+    const res = await graph<{ data: { id: string; media_type?: string; permalink?: string; timestamp: string }[] }>(
+      `${cfg.igAccountId}/stories`,
+      { fields: "id,media_type,timestamp,permalink" },
+      cfg,
+      60_000
+    );
+
+    const out: StoryItem[] = [];
+    for (const s of res.data ?? []) {
+      let insights: Record<string, number | null> = {};
+      try {
+        const r = await graph<{ data: { name: string; values?: { value: number }[]; total_value?: { value?: number } }[] }>(
+          `${s.id}/insights`,
+          { metric: "reach,views,replies,navigation,total_interactions" },
+          cfg,
+          300_000
+        );
+        insights = Object.fromEntries(
+          (r.data ?? []).map((d) => [d.name, d.values?.[0]?.value ?? d.total_value?.value ?? null])
+        );
+      } catch {
+        // A story younger than a few minutes has no insights yet. Keeping the
+        // story with null metrics beats dropping it from the count.
+      }
+      out.push({
+        id: s.id,
+        mediaType: s.media_type ?? "IMAGE",
+        permalink: s.permalink ?? "",
+        timestamp: s.timestamp,
+        reach: insights.reach ?? null,
+        views: insights.views ?? null,
+        replies: insights.replies ?? null,
+        navigation: insights.navigation ?? null,
+        totalInteractions: insights.total_interactions ?? null,
+      });
+    }
+    return out;
+  } catch (err) {
+    console.warn(`[instagram] stories unavailable: ${(err as Error).message}`);
+    return [];
+  }
 }

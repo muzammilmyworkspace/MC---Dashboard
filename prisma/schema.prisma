@@ -354,6 +354,17 @@ model IgDailySnapshot {
 
   @@unique([igAccountId, date])
   @@index([igAccountId, date])
+  /* --- Account-wide daily totals, all measured by Meta -------------------
+     Confirmed available on this account by probing the API one metric at a
+     time; `impressions` is deliberately absent because Meta removed it. */
+  websiteClicks     Int?
+  likes             Int?
+  comments          Int?
+  shares            Int?
+  saves             Int?
+  /** Story replies. Account-wide, not per-story. */
+  replies           Int?
+
 }
 
 /** Posts, reels and their insights. Upserted by IG media id. */
@@ -384,6 +395,10 @@ model IgMedia {
   syncedAt DateTime @updatedAt
 
   @@index([igAccountId, timestamp])
+  /** FEED-only insights; Meta rejects these metrics for reels. */
+  profileVisits Int?
+  followsFromPost Int?
+
 }
 
 /* --------------------------- Deployment Center -------------------------- */
@@ -639,4 +654,28 @@ model LandingPage {
   updatedAt DateTime @updatedAt
 
   @@index([isSelected, createdAt])
+}
+
+
+/**
+ * A story, captured while its insights still exist.
+ *
+ * Stories disappear after 24 hours and their insights go with them, so this
+ * table is the only lasting record — a missed sync is a permanent gap, the
+ * same way it is for follower history.
+ */
+model IgStory {
+  id           String   @id
+  igAccountId  String
+  mediaType    String   @default("IMAGE")
+  permalink    String   @default("")
+  timestamp    DateTime
+  reach        Int?
+  views        Int?
+  replies      Int?
+  navigation   Int?
+  totalInteractions Int?
+  capturedAt   DateTime @default(now())
+
+  @@index([igAccountId, timestamp])
 }

@@ -13,8 +13,8 @@ import "server-only";
 import { env } from "../env";
 import { prisma } from "../prisma";
 import {
-  getAccount, getDailyInsights, getFollowActivity, getMedia, getMediaInsights, getTodayTotals,
-  igConfig, isConfigured, MetaApiError,
+  getAccount, getDailyInsights, getDayTotals, getFollowActivity, getMedia, getMediaInsights,
+  getStories, igConfig, isConfigured, MetaApiError,
 } from "./client";
 
 const INTEGRATION_KEY = "instagram-graph";
@@ -45,6 +45,7 @@ export interface SyncResult {
   followers?: number;
   mediaSynced?: number;
   daysBackfilled?: number;
+  storiesSynced?: number;
   error?: string;
 }
 
@@ -147,43 +148,65 @@ export async function syncInstagram(trigger = "manual"): Promise<SyncResult> {
 
     for (const target of activityDays) {
       try {
-        const activity = await getFollowActivity(target, cfg);
-        if (activity.follows !== null || activity.unfollows !== null) {
+        // Two calls per day: the follow pair and the eleven account-wide
+        // totals. Both are per-day figures Meta will not break out of a
+        // range, so a daily series has to be assembled a day at a time.
+        const [activity, totals] = await Promise.all([
+          getFollowActivity(target, cfg),
+          getDayTotals(target, cfg),
+        ]);
+
+        // Only write columns Meta actually returned. Writing 0 for an absent
+        // metric would make "no data" indistinguishable from "none happened".
+        const measured = {
+          ...(activity.follows !== null ? { newFollowers: activity.follows } : {}),
+          ...(activity.unfollows !== null ? { unfollows: activity.unfollows } : {}),
+          ...(totals.reach !== null ? { reach: totals.reach } : {}),
+          ...(totals.views !== null ? { views: totals.views } : {}),
+          ...(totals.profileViews !== null ? { profileViews: totals.profileViews } : {}),
+          ...(totals.accountsEngaged !== null ? { accountsEngaged: totals.accountsEngaged } : {}),
+          ...(totals.totalInteractions !== null ? { totalInteractions: totals.totalInteractions } : {}),
+          ...(totals.websiteClicks !== null ? { websiteClicks: totals.websiteClicks } : {}),
+          ...(totals.likes !== null ? { likes: totals.likes } : {}),
+          ...(totals.comments !== null ? { comments: totals.comments } : {}),
+          ...(totals.shares !== null ? { shares: totals.shares } : {}),
+          ...(totals.saves !== null ? { saves: totals.saves } : {}),
+          ...(totals.replies !== null ? { replies: totals.replies } : {}),
+        };
+
+        if (Object.keys(measured).length > 0) {
           await prisma.igDailySnapshot.upsert({
             where: { igAccountId_date: { igAccountId: account.id, date: dateOnly(target) } },
-            create: {
-              igAccountId: account.id,
-              date: dateOnly(target),
-              newFollowers: activity.follows,
-              unfollows: activity.unfollows,
-            },
-            update: {
-              ...(activity.follows !== null ? { newFollowers: activity.follows } : {}),
-              ...(activity.unfollows !== null ? { unfollows: activity.unfollows } : {}),
-            },
+            create: { igAccountId: account.id, date: dateOnly(target), ...measured },
+            update: measured,
           });
         }
       } catch (err) {
-        console.warn(`[instagram] follow activity for ${target} skipped: ${(err as Error).message}`);
+        console.warn(`[instagram] daily metrics for ${target} skipped: ${(err as Error).message}`);
       }
     }
 
-    /* 4 — Today's total_value metrics. */
+    /* 3b — Stories. Only the last 24 hours exist in the API, so whatever is
+            live right now is captured; anything missed is unrecoverable. */
+    let storiesSynced = 0;
     try {
-      const totals = await getTodayTotals(cfg);
-      if (Object.values(totals).some((v) => v !== undefined)) {
-        await prisma.igDailySnapshot.update({
-          where: { igAccountId_date: { igAccountId: account.id, date: dateOnly(today) } },
-          data: {
-            views: totals.views,
-            profileViews: totals.profileViews,
-            accountsEngaged: totals.accountsEngaged,
-            totalInteractions: totals.totalInteractions,
-          },
-        });
+      for (const story of await getStories(cfg)) {
+        const data = {
+          igAccountId: account.id,
+          mediaType: story.mediaType,
+          permalink: story.permalink,
+          timestamp: new Date(story.timestamp),
+          reach: story.reach,
+          views: story.views,
+          replies: story.replies,
+          navigation: story.navigation,
+          totalInteractions: story.totalInteractions,
+        };
+        await prisma.igStory.upsert({ where: { id: story.id }, create: { id: story.id, ...data }, update: data });
+        storiesSynced++;
       }
     } catch (err) {
-      console.warn(`[instagram] totals skipped: ${(err as Error).message}`);
+      console.warn(`[instagram] stories skipped: ${(err as Error).message}`);
     }
 
     /* 4 — Media + per-post insights. */
@@ -211,6 +234,8 @@ export async function syncInstagram(trigger = "manual"): Promise<SyncResult> {
           shares: insights.shares ?? null,
           totalInteractions: insights.totalInteractions ?? null,
           avgWatchTimeMs: insights.avgWatchTimeMs ?? null,
+          profileVisits: insights.profileVisits ?? null,
+          followsFromPost: insights.follows ?? null,
         };
 
         await prisma.igMedia.upsert({ where: { id: m.id }, create: { id: m.id, ...data }, update: data });
@@ -232,7 +257,7 @@ export async function syncInstagram(trigger = "manual"): Promise<SyncResult> {
 
 
     console.log(`[instagram] ${trigger} sync ok — ${account.followers_count} followers, ${mediaSynced} posts`);
-    return { ok: true, followers: account.followers_count, mediaSynced, daysBackfilled };
+    return { ok: true, followers: account.followers_count, mediaSynced, daysBackfilled, storiesSynced };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Sync failed";
     const authFailure = err instanceof MetaApiError && err.authFailure;
