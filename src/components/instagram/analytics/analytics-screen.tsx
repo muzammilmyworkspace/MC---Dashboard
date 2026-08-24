@@ -12,7 +12,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { MetricCard } from "@/components/analytics/metric-card";
 import { FilterBar, DEFAULT_RANGE, type Range } from "./filter-bar";
-import { ContentTable, EmptyBlock, GroupSummary, PublishingHeatmap, SectionHeading, Stat, num } from "./sections";
+import { ContentTable, EmptyBlock, GroupSummary, PublishingHeatmap, SectionHeading, Stat, num, fmtDay } from "./sections";
 import { cn } from "@/lib/utils";
 
 /* ------------------------------------------------------------------ *
@@ -99,6 +99,9 @@ export function InstagramAnalytics() {
   const buckets = data?.buckets ?? [];
   const prov = data?.provenance ?? {};
 
+  /** The selected period has no published follow figures at all. */
+  const noFollowData = Boolean(data) && (data?.totals.daysWithFollowData ?? 0) === 0;
+
   /* ------------------------------ error state ---------------------------- */
 
   if (error) {
@@ -146,15 +149,45 @@ export function InstagramAnalytics() {
         lastSyncAt={data?.lastSyncAt ?? null}
       />
 
-      {/* Meta's reporting lag, stated once rather than as a dash on every card. */}
-      {(data?.pendingDays ?? 0) > 0 && (
-        <div className="flex items-start gap-2.5 rounded-xl border border-accent/25 bg-accent/[0.05] p-3">
-          <Info className="mt-0.5 size-4 shrink-0 text-accent" />
-          <p className="text-xs text-muted-foreground">
-            Instagram publishes follower and engagement figures about two days late, so the{" "}
-            {data?.pendingDays === 1 ? "most recent day is" : `${data?.pendingDays} most recent days are`} still empty.
-            They fill in automatically.
-          </p>
+      {/* Meta's reporting lag, answered once with a way out of it. */}
+      {data && data.pendingDays > 0 && (
+        <div className="flex flex-col gap-2.5 rounded-xl border border-accent/25 bg-accent/[0.05] p-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-2.5">
+            <Info className="mt-0.5 size-4 shrink-0 text-accent" />
+            <p className="text-xs text-muted-foreground">
+              {noFollowData ? (
+                <>
+                  Instagram has not published follower figures for{" "}
+                  <strong className="text-foreground">{range.label.toLowerCase()}</strong> yet. It reports them about
+                  two days late.
+                  {data.lastCompleteDay && <> The most recent complete day is {fmtDay(data.lastCompleteDay)}.</>}
+                </>
+              ) : (
+                <>
+                  Instagram reports follower figures about two days late, so the{" "}
+                  {data.pendingDays === 1 ? "last day of this period is" : `last ${data.pendingDays} days of this period are`}{" "}
+                  still filling in. Everything else on this page is complete.
+                </>
+              )}
+            </p>
+          </div>
+          {noFollowData && data.lastCompleteDay && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="shrink-0"
+              onClick={() =>
+                setRange({
+                  startDate: data.lastCompleteDay!,
+                  endDate: data.lastCompleteDay!,
+                  label: fmtDay(data.lastCompleteDay!),
+                  granularity: "daily",
+                })
+              }
+            >
+              Show {fmtDay(data.lastCompleteDay)}
+            </Button>
+          )}
         </div>
       )}
 
@@ -190,6 +223,21 @@ export function InstagramAnalytics() {
           label="Content published" value={data?.content.total ?? null} loading={stale}
           help="Posts, reels and carousels published during this period."
         />
+      </section>
+
+      {/* ------------------------------ the table ----------------------------- */}
+      <section className="space-y-3">
+        <SectionHeading
+          title={`${range.granularity === "daily" ? "Daily" : range.granularity === "weekly" ? "Weekly" : "Monthly"} report`}
+          description="Every figure for the period, as reported by Instagram."
+        />
+        <Card className="overflow-hidden">
+          {stale ? (
+            <div className="h-64 animate-pulse bg-muted/40" />
+          ) : (
+            <ReportTable buckets={buckets} granularity={range.granularity} />
+          )}
+        </Card>
       </section>
 
       {/* --------------------------- follower growth -------------------------- */}
@@ -409,21 +457,6 @@ export function InstagramAnalytics() {
         </Card>
       </section>
 
-      {/* ------------------------------ the table ----------------------------- */}
-      <section className="space-y-3">
-        <SectionHeading
-          title={`${range.granularity === "daily" ? "Daily" : range.granularity === "weekly" ? "Weekly" : "Monthly"} report`}
-          description="Every figure for the period, as reported by Instagram."
-        />
-        <Card className="overflow-hidden">
-          {stale ? (
-            <div className="h-64 animate-pulse bg-muted/40" />
-          ) : (
-            <ReportTable buckets={buckets} />
-          )}
-        </Card>
-      </section>
-
       {/* ---------------------------- provenance ------------------------------ */}
       <section className="space-y-3">
         <SectionHeading title="Where this data comes from" />
@@ -557,40 +590,95 @@ const COLUMNS: { key: keyof IgBucket; label: string; suffix?: string }[] = [
   { key: "websiteClicks", label: "Clicks" },
 ];
 
-function ReportTable({ buckets }: { buckets: IgBucket[] }) {
+function ReportTable({ buckets, granularity }: { buckets: IgBucket[]; granularity: string }) {
   if (buckets.length === 0) {
     return <p className="py-12 text-center text-sm text-muted-foreground">No data for this period.</p>;
   }
 
   // Newest first — a report is read from the top.
   const rows = [...buckets].reverse();
+  const unit = granularity === "daily" ? "day" : granularity === "weekly" ? "week" : "month";
+
+  // A row Instagram has not published is marked as waiting rather than left
+  // as a line of bare dashes, which reads as a fault in the dashboard.
+  const isPending = (b: IgBucket) => b.newFollowers === null && b.unfollows === null;
+
+  const totalOf = (k: keyof IgBucket) => {
+    const vals = buckets.map((b) => b[k]).filter((v): v is number => typeof v === "number");
+    return vals.length ? vals.reduce((a, c) => a + c, 0) : null;
+  };
+
+  const anyFollowerGap = buckets.some((b) => b.followers === null);
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[900px] text-sm">
-        <thead>
-          <tr className="border-b border-border text-left">
-            <th className="px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Period</th>
-            {COLUMNS.map((c) => (
-              <th key={String(c.key)} className="px-4 py-2.5 text-right text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                {c.label}
+    <>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[900px] text-sm">
+          <thead>
+            <tr className="border-b border-border text-left">
+              <th className="px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                {unit === "day" ? "Date" : unit === "week" ? "Week" : "Month"}
               </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((b) => (
-            <tr key={b.key} className="border-b border-border/60 last:border-0 hover:bg-muted/30">
-              <td className="whitespace-nowrap px-4 py-2.5 font-medium">{b.label}</td>
+              {COLUMNS.map((c) => (
+                <th key={String(c.key)} className="px-4 py-2.5 text-right text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  {c.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((b) => {
+              const pending = isPending(b);
+              return (
+                <tr key={b.key} className={cn("border-b border-border/60 last:border-0 hover:bg-muted/30", pending && "bg-muted/20")}>
+                  <td className="whitespace-nowrap px-4 py-2.5 font-medium">
+                    <span className="flex items-center gap-2">
+                      {b.label}
+                      {pending && (
+                        <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+                          Waiting
+                        </span>
+                      )}
+                    </span>
+                  </td>
+                  {COLUMNS.map((c) => {
+                    const v = b[c.key] as number | null;
+                    const isNet = c.key === "netGrowth";
+                    return (
+                      <td
+                        key={String(c.key)}
+                        className={cn(
+                          "px-4 py-2.5 text-right tabular-nums",
+                          v === null && "text-muted-foreground/40",
+                          isNet && v !== null && v > 0 && "text-success",
+                          isNet && v !== null && v < 0 && "text-danger"
+                        )}
+                      >
+                        {v === null ? "—" : isNet && v > 0 ? `+${v}` : v.toLocaleString()}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            <tr className="border-t-2 border-border bg-muted/30 font-semibold">
+              <td className="px-4 py-2.5 text-xs uppercase tracking-wider">Total</td>
               {COLUMNS.map((c) => {
-                const v = b[c.key] as number | null;
+                // Followers is a level: its column total would be meaningless,
+                // so the footer shows the latest reading instead of a sum.
+                const isLevel = c.key === "followers";
+                const v = isLevel
+                  ? (rows.find((r) => r.followers !== null)?.followers ?? null)
+                  : totalOf(c.key);
                 const isNet = c.key === "netGrowth";
                 return (
                   <td
                     key={String(c.key)}
                     className={cn(
                       "px-4 py-2.5 text-right tabular-nums",
-                      v === null && "text-muted-foreground/40",
+                      v === null && "font-normal text-muted-foreground/40",
                       isNet && v !== null && v > 0 && "text-success",
                       isNet && v !== null && v < 0 && "text-danger"
                     )}
@@ -600,9 +688,23 @@ function ReportTable({ buckets }: { buckets: IgBucket[] }) {
                 );
               })}
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </tfoot>
+        </table>
+      </div>
+
+      <div className="space-y-1 border-t border-border px-4 py-3">
+        <p className="text-[11px] text-muted-foreground">
+          Rows marked <span className="font-medium">Waiting</span> are days Instagram has not published yet. It reports
+          follower figures about two days late.
+        </p>
+        {anyFollowerGap && (
+          <p className="text-[11px] text-muted-foreground">
+            The Followers column is blank before daily tracking began on this account. Instagram does not publish
+            historical follower totals, so those days cannot be filled in — the New, Unfollows and Net columns are
+            complete regardless.
+          </p>
+        )}
+      </div>
+    </>
   );
 }

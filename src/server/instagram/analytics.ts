@@ -180,6 +180,14 @@ export interface AnalyticsResponse {
   lastSyncAt: string | null;
   /** Days at the end of the range Meta has not published yet. */
   pendingDays: number;
+  /**
+   * The newest day anywhere in the account with a complete follow pair,
+   * regardless of the selected range.
+   *
+   * Lets the screen answer "why is today empty?" with a date the client can
+   * jump to, instead of leaving them staring at dashes.
+   */
+  lastCompleteDay: string | null;
 }
 
 /* -------------------------------- the query ------------------------------ */
@@ -206,6 +214,7 @@ const empty: AnalyticsResponse = {
   provenance: {},
   lastSyncAt: null,
   pendingDays: 0,
+  lastCompleteDay: null,
 };
 
 function emptyGroup(): GroupStats {
@@ -448,6 +457,14 @@ export async function getAnalytics(query: AnalyticsQuery): Promise<AnalyticsResp
 
   const publishedDays = days.length;
 
+  // Looked up outside the range on purpose: when the range is a single
+  // unpublished day there is nothing inside it to point at.
+  const newestComplete = await prisma.igDailySnapshot.findFirst({
+    where: { igAccountId: accountId, newFollowers: { not: null }, unfollows: { not: null } },
+    orderBy: { date: "desc" },
+    select: { date: true },
+  });
+
   return {
     configured: true,
     range: { startDate, endDate, granularity, days: days.length },
@@ -495,5 +512,6 @@ export async function getAnalytics(query: AnalyticsQuery): Promise<AnalyticsResp
     provenance,
     lastSyncAt: integration?.lastSyncAt?.toISOString() ?? null,
     pendingDays,
+    lastCompleteDay: newestComplete ? iso(newestComplete.date) : null,
   };
 }

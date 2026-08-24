@@ -119,6 +119,8 @@ async function raw<T>(path: string, init: RequestInit = {}, retry = true): Promi
   // Access token expired → refresh once, then replay the request.
   if (res.status === 401 && retry && path !== "/api/auth/refresh") {
     const refreshed = await tryRefresh();
+    // The replay rebuilds its headers from the module-level token, so a call
+    // that waited on someone else's refresh still picks up the fresh one.
     if (refreshed) return raw<T>(path, init, false);
   }
 
@@ -131,19 +133,42 @@ async function raw<T>(path: string, init: RequestInit = {}, retry = true): Promi
   return payload as T;
 }
 
+/**
+ * The one refresh in flight, shared by every caller.
+ *
+ * Without this the app signs itself out at random. Several components fetch
+ * on mount; when the access token has expired they all get a 401 at once and
+ * each calls refresh. Refresh tokens rotate — the first call revokes the
+ * presented token and issues a new one — so the rest arrive holding a token
+ * that no longer exists, fail, and render "sign in" beside sections that
+ * loaded perfectly. Collapsing them onto a single promise means one rotation
+ * per expiry, and every waiter gets its result.
+ */
+let refreshInFlight: Promise<boolean> | null = null;
+
 async function tryRefresh(): Promise<boolean> {
-  try {
-    const res = await fetch(`${API_URL}/api/auth/refresh`, { method: "POST", credentials: "include" });
-    if (!res.ok) {
+  if (refreshInFlight) return refreshInFlight;
+
+  refreshInFlight = (async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/auth/refresh`, { method: "POST", credentials: "include" });
+      if (!res.ok) {
+        setAccessToken(null);
+        return false;
+      }
+      const data = (await res.json()) as { accessToken: string };
+      setAccessToken(data.accessToken);
+      return true;
+    } catch {
       setAccessToken(null);
       return false;
     }
-    const data = (await res.json()) as { accessToken: string };
-    setAccessToken(data.accessToken);
-    return true;
-  } catch {
-    setAccessToken(null);
-    return false;
+  })();
+
+  try {
+    return await refreshInFlight;
+  } finally {
+    refreshInFlight = null;
   }
 }
 
@@ -267,6 +292,7 @@ export interface IgAnalytics {
   provenance: Record<string, IgProvenance>;
   lastSyncAt: string | null;
   pendingDays: number;
+  lastCompleteDay: string | null;
 }
 
 /* ------------------------------ endpoints ------------------------------- */

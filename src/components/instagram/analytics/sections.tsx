@@ -17,6 +17,10 @@ import { cn } from "@/lib/utils";
 export const num = (v: number | null | undefined, suffix = "") =>
   v === null || v === undefined ? "—" : `${v.toLocaleString()}${suffix}`;
 
+/** "22 Aug" from a YYYY-MM-DD key, read in UTC so the day never shifts. */
+export const fmtDay = (key: string) =>
+  new Date(`${key}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+
 export const shortDate = (iso: string) =>
   new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 
