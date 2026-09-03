@@ -112,6 +112,7 @@ model User {
 
   @@index([role])
   landingPages LandingPage[]
+  blogs        Blog[]
 }
 
 /* -------------------------------- Tasks -------------------------------- */
@@ -591,6 +592,11 @@ model AuditLog {
 
 /* ----------------------------- Landing Pages ------------------------------ */
 
+enum BlogStatus {
+  DRAFT
+  PUBLISHED
+}
+
 enum LandingPageSource {
   VERCEL
   MANUAL
@@ -678,4 +684,46 @@ model IgStory {
   capturedAt   DateTime @default(now())
 
   @@index([igAccountId, timestamp])
+}
+
+/* --------------------------------- Blogs -------------------------------- */
+
+/**
+ * An SEO blog post. Every row is a draft until `status` is flipped to
+ * PUBLISHED — that single field is what the public site (or a future public
+ * route) uses to decide what to serve, so an in-progress post can be edited
+ * and previewed indefinitely without ever being reachable.
+ */
+model Blog {
+  id      String @id @default(cuid())
+  title   String
+  /** The public URL segment. Unique so two posts can never collide on it. */
+  slug    String @unique
+  excerpt String @default("")
+  content String @default("")
+
+  coverImage String @default("")
+  /** Free-text service/topic this post targets, e.g. "SEO", "Web Design". */
+  category   String @default("")
+
+  status BlogStatus @default(DRAFT)
+  /**
+   * Set once, the first time a post is published, and never moved back —
+   * it is the "first went live" date search engines and readers expect,
+   * not a "last published" timestamp that would jump on every edit.
+   */
+  publishedAt DateTime?
+
+  /** Falls back to `title`/`excerpt` on the page when left blank. */
+  seoTitle       String   @default("")
+  seoDescription String   @default("")
+  keywords       String[] @default([])
+
+  authorId String?
+  author   User?   @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, publishedAt])
 }

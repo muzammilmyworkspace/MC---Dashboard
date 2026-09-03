@@ -1,4 +1,4 @@
-import { Home, Settings, Plug, ServerCog, CalendarDays } from "lucide-react";
+import { Home, Settings, Plug, ServerCog, CalendarDays, Newspaper } from "lucide-react";
 import { dashboardModule, platformModules, type ModuleIcon } from "./modules-registry";
 import { type Role } from "./data";
 
@@ -17,6 +17,7 @@ export interface NavItem {
  */
 export const primaryNav: NavItem[] = [
   { label: dashboardModule.name, href: dashboardModule.href, icon: dashboardModule.icon },
+  { label: "Blogs", href: "/blogs", icon: Newspaper },
   ...platformModules.map((m) => ({ label: m.name, href: m.href, icon: m.icon })),
 ];
 

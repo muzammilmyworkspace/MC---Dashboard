@@ -238,6 +238,33 @@ export interface VercelDeploymentRecord {
   creator: string | null;
 }
 
+/* ---------------------------------- blogs --------------------------------- */
+
+export type BlogStatus = "DRAFT" | "PUBLISHED";
+
+export interface BlogPost {
+  id: string;
+  title: string;
+  slug: string;
+  excerpt: string;
+  content: string;
+  coverImage: string;
+  category: string;
+  status: BlogStatus;
+  publishedAt: string | null;
+  seoTitle: string;
+  seoDescription: string;
+  keywords: string[];
+  authorId: string | null;
+  authorName: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type BlogPatch = Partial<
+  Pick<BlogPost, "title" | "slug" | "excerpt" | "content" | "coverImage" | "category" | "seoTitle" | "seoDescription" | "keywords">
+>;
+
 /* -------------------------- instagram analytics -------------------------- */
 
 export type IgGranularity = "daily" | "weekly" | "monthly";
@@ -604,6 +631,16 @@ export const api = {
     remove: (id: string) => del<{ removed: boolean; id: string }>(`/api/landing-pages/${id}`),
     deployments: (id: string) =>
       get<{ deployments: VercelDeploymentRecord[]; reason: string | null }>(`/api/landing-pages/${id}/deployments`),
+  },
+
+  blogs: {
+    list: () => get<{ blogs: BlogPost[] }>("/api/blogs"),
+    get: (id: string) => get<{ blog: BlogPost }>(`/api/blogs/${id}`),
+    create: () => post<{ blog: BlogPost }>("/api/blogs"),
+    update: (id: string, body: BlogPatch) => patch<{ blog: BlogPost }>(`/api/blogs/${id}`, body),
+    remove: (id: string) => del<{ removed: boolean; id: string }>(`/api/blogs/${id}`),
+    publish: (id: string) => post<{ blog: BlogPost }>(`/api/blogs/${id}/publish`),
+    unpublish: (id: string) => raw<{ blog: BlogPost }>(`/api/blogs/${id}/publish`, { method: "DELETE" }),
   },
 
   integrations: {
