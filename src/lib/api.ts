@@ -257,6 +257,9 @@ export interface BlogPost {
   keywords: string[];
   authorId: string | null;
   authorName: string | null;
+  /** Set once this post has been pushed to the live WordPress site. */
+  wpPostId: number | null;
+  wpUrl: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -639,8 +642,9 @@ export const api = {
     create: () => post<{ blog: BlogPost }>("/api/blogs"),
     update: (id: string, body: BlogPatch) => patch<{ blog: BlogPost }>(`/api/blogs/${id}`, body),
     remove: (id: string) => del<{ removed: boolean; id: string }>(`/api/blogs/${id}`),
-    publish: (id: string) => post<{ blog: BlogPost }>(`/api/blogs/${id}/publish`),
-    unpublish: (id: string) => raw<{ blog: BlogPost }>(`/api/blogs/${id}/publish`, { method: "DELETE" }),
+    /** `wpError` is set when the post published in MC Nexus but couldn't be pushed to maincharacter.nl. */
+    publish: (id: string) => post<{ blog: BlogPost; wpError: string | null }>(`/api/blogs/${id}/publish`),
+    unpublish: (id: string) => raw<{ blog: BlogPost; wpError: string | null }>(`/api/blogs/${id}/publish`, { method: "DELETE" }),
   },
 
   integrations: {

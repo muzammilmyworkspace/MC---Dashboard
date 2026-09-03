@@ -26,6 +26,8 @@ export interface BlogDto {
   keywords: string[];
   authorId: string | null;
   authorName: string | null;
+  wpPostId: number | null;
+  wpUrl: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -48,6 +50,8 @@ function toDto(row: BlogRow): BlogDto {
     keywords: row.keywords,
     authorId: row.authorId,
     authorName: row.author?.name ?? null,
+    wpPostId: row.wpPostId,
+    wpUrl: row.wpUrl,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -152,6 +156,14 @@ export async function unpublishBlog(id: string): Promise<BlogDto | null> {
     data: { status: BlogStatus.DRAFT },
     include: includeAuthor,
   });
+  return toDto(row);
+}
+
+/** Records the WordPress post a publish just created or updated. */
+export async function setWordPressLink(id: string, link: { wpPostId: number; wpUrl: string }): Promise<BlogDto | null> {
+  const existing = await prisma.blog.findUnique({ where: { id } });
+  if (!existing) return null;
+  const row = await prisma.blog.update({ where: { id }, data: link, include: includeAuthor });
   return toDto(row);
 }
 

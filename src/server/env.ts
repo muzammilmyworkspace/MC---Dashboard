@@ -54,6 +54,14 @@ const schema = z.object({
 
   /** How long provider responses stay cached. */
   DEPLOY_CACHE_TTL_MS: z.coerce.number().default(60_000),
+
+  // --- WordPress (Blogs → maincharacter.nl) -----------------------------
+  /** e.g. https://maincharacter.nl — no trailing slash needed. */
+  WORDPRESS_URL: z.string().optional(),
+  /** A WordPress username with edit_posts capability, not the display name. */
+  WORDPRESS_USERNAME: z.string().optional(),
+  /** A WordPress Application Password (Users → Profile → Application Passwords) — never the account password. */
+  WORDPRESS_APP_PASSWORD: z.string().optional(),
 });
 
 const parsed = schema.safeParse(process.env);

@@ -722,6 +722,13 @@ model Blog {
   authorId String?
   author   User?   @relation(fields: [authorId], references: [id], onDelete: SetNull)
 
+  /**
+   * The linked WordPress post on maincharacter.nl, once pushed there. Its
+   * presence is what makes a publish an update instead of a duplicate post.
+   */
+  wpPostId Int?
+  wpUrl    String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

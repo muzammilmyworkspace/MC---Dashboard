@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
-  ArrowLeft, Check, Clock, ImageIcon, Loader2, Rocket, Search, Trash2, X,
+  AlertTriangle, ArrowLeft, Check, Clock, ExternalLink, ImageIcon, Loader2, Rocket, Search, Trash2, X,
 } from "lucide-react";
 import { api, ApiRequestError, type BlogPost } from "@/lib/api";
 import { blogStatusMeta, readingMinutes, seoChecklist, slugify } from "@/lib/blogs";
@@ -59,6 +59,7 @@ export function BlogEditor({ id }: { id: string }) {
   const [slugTouched, setSlugTouched] = useState(false);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [publishing, setPublishing] = useState(false);
+  const [wpError, setWpError] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [mobileTab, setMobileTab] = useState<"edit" | "preview">("edit");
 
@@ -142,14 +143,23 @@ export function BlogEditor({ id }: { id: string }) {
   async function togglePublish() {
     if (!post) return;
     setPublishing(true);
+    setWpError(null);
     try {
-      const { blog } = post.status === "PUBLISHED" ? await api.blogs.unpublish(post.id) : await api.blogs.publish(post.id);
+      const { blog, wpError: err } =
+        post.status === "PUBLISHED" ? await api.blogs.unpublish(post.id) : await api.blogs.publish(post.id);
       setPost(blog);
+      setWpError(err);
       if (blog.status === "PUBLISHED") {
-        celebrate();
-        toast.success("Published.", { description: "The post is now live." });
+        if (err) {
+          toast.warning("Published in MC Nexus, but not on maincharacter.nl.", { description: err });
+        } else {
+          celebrate();
+          toast.success("Published.", { description: "Live on maincharacter.nl." });
+        }
       } else {
-        toast.success("Moved back to draft.");
+        toast.success(err ? "Moved back to draft in MC Nexus." : "Moved back to draft — pulled from maincharacter.nl too.", {
+          description: err ?? undefined,
+        });
       }
     } catch (err) {
       toast.error("Couldn't change the publish state.", { description: err instanceof ApiRequestError ? err.message : undefined });
@@ -226,11 +236,21 @@ export function BlogEditor({ id }: { id: string }) {
             </Link>
           </Button>
           <div className="min-w-0">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Badge variant={status.tone === "success" ? "success" : status.tone === "warning" ? "warning" : "secondary"}>
                 {status.label}
               </Badge>
               <SaveIndicator state={saveState} />
+              {post.wpUrl && (
+                <a
+                  href={post.wpUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-xs font-medium text-accent hover:underline"
+                >
+                  <ExternalLink className="size-3" /> View live on maincharacter.nl
+                </a>
+              )}
             </div>
           </div>
         </div>
@@ -249,6 +269,19 @@ export function BlogEditor({ id }: { id: string }) {
           </Button>
         </div>
       </div>
+
+      {wpError && (
+        <Card className="flex items-start gap-2.5 border-warning/30 bg-warning/5 p-3.5 text-xs">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
+          <div>
+            <p className="font-medium text-foreground">Couldn&apos;t reach maincharacter.nl.</p>
+            <p className="mt-0.5 text-muted-foreground">
+              The post is published in MC Nexus, but the live site wasn&apos;t updated: {wpError}. Press Publish again once
+              it&apos;s reachable.
+            </p>
+          </div>
+        </Card>
+      )}
 
       {/* Mobile edit/preview switch — desktop shows both panels side by side */}
       <div className="flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-1 text-sm lg:hidden">
