@@ -52,6 +52,38 @@ async function graphPost<T>(path: string, body: unknown, token: string): Promise
   return providerRequest<T>({ provider: "meta-messaging", url: `${GRAPH}/${env.META_GRAPH_VERSION}/${path}`, token, method: "POST", body });
 }
 
+/**
+ * Configuring the webhook URL under the app's Instagram product only says
+ * *where* events go — the connected Page still has to be individually
+ * subscribed to this app before it actually forwards anything, via
+ * `POST /{page-id}/subscribed_apps`. The OAuth flow never did this, so
+ * every account connected before this file existed silently sends nothing.
+ *
+ * Checked at most once per `RECHECK_MS` (module-scoped, so it survives for
+ * a warm serverless instance) rather than on every list-conversations poll
+ * — it's a no-op most of the time, but self-heals within one interval of
+ * this deploying, with no manual step.
+ */
+let lastSubscribeCheck = 0;
+const RECHECK_MS = 6 * 60 * 60 * 1000;
+
+export async function ensurePageSubscribed(): Promise<void> {
+  if (Date.now() - lastSubscribeCheck < RECHECK_MS) return;
+  lastSubscribeCheck = Date.now();
+
+  try {
+    const auth = await requireConnectedPage();
+    const url = `${GRAPH}/${env.META_GRAPH_VERSION}/${auth.pageId}/subscribed_apps?subscribed_fields=messages`;
+    const res = await fetch(url, { method: "POST", headers: { Authorization: `Bearer ${auth.pageAccessToken}` } });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      console.error(`[ig-messaging] page subscribe failed (${res.status}): ${body.slice(0, 300)}`);
+    }
+  } catch (err) {
+    console.error(`[ig-messaging] page subscribe check failed: ${err instanceof Error ? err.message : err}`);
+  }
+}
+
 /* ----------------------------------- DTOs ---------------------------------- */
 
 export interface MetaConversationDto {
