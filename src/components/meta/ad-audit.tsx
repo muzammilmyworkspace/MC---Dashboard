@@ -1,8 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Image as ImageIcon, Layers, Megaphone, PlayCircle, Search, SquareStack, ExternalLink } from "lucide-react";
-import type { Ad, AdCampaign, AdCreative, AdMediaType, AdSet } from "@/lib/api";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import {
+  ChevronRight, ExternalLink, Image as ImageIcon, Layers, Loader2, Megaphone,
+  PlayCircle, Search, SquareStack,
+} from "lucide-react";
+import { api, type Ad, type AdCampaign, type AdCreative, type AdMediaType, type AdSet } from "@/lib/api";
 import { MetricCard } from "@/components/analytics/metric-card";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -13,10 +17,10 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/compone
 import { cn } from "@/lib/utils";
 
 /* ------------------------------------------------------------------ *
- *  Ad Audit — every ad set and every ad copy in the account, so a full
- *  audit doesn't require opening Ads Manager: which ad sets exist, how
- *  many images vs. reels are running, and — the point of an audit —
- *  which specific ad copy produced which sales.
+ *  Ad Audit — every campaign expands into its ad sets, every ad set
+ *  expands into its ad copies, and hovering an ad copy shows the actual
+ *  image or plays the actual Reel, so an audit never requires opening
+ *  Ads Manager to see what's actually running.
  * ------------------------------------------------------------------ */
 
 const MEDIA_META: Record<AdMediaType, { label: string; icon: typeof ImageIcon }> = {
@@ -27,6 +31,11 @@ const MEDIA_META: Record<AdMediaType, { label: string; icon: typeof ImageIcon }>
 };
 
 type MediaFilter = "ALL" | AdMediaType;
+
+const money = (currency: string, v: number | null) =>
+  v === null ? null : `${currency ? currency + " " : ""}${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+const pct = (v: number | null) => (v === null ? null : `${v.toFixed(2)}%`);
+const roasFmt = (v: number | null) => (v === null ? null : `${v.toFixed(2)}×`);
 
 export function AdAudit({
   numericAccountId,
@@ -46,13 +55,22 @@ export function AdAudit({
   const [query, setQuery] = useState("");
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>("ALL");
   const [detailAd, setDetailAd] = useState<Ad | null>(null);
+  const [expandedCampaigns, setExpandedCampaigns] = useState<Set<string>>(new Set());
+  const [expandedAdSets, setExpandedAdSets] = useState<Set<string>>(new Set());
 
   const campaignName = useMemo(() => new Map(campaigns.map((c) => [c.id, c.name])), [campaigns]);
   const adSetName = useMemo(() => new Map(adSets.map((s) => [s.id, s.name])), [adSets]);
-  const adsPerAdSet = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const ad of ads) counts.set(ad.adsetId, (counts.get(ad.adsetId) ?? 0) + 1);
-    return counts;
+
+  const adSetsByCampaign = useMemo(() => {
+    const map = new Map<string, AdSet[]>();
+    for (const s of adSets) map.set(s.campaignId, [...(map.get(s.campaignId) ?? []), s]);
+    return map;
+  }, [adSets]);
+
+  const adsByAdSet = useMemo(() => {
+    const map = new Map<string, Ad[]>();
+    for (const a of ads) map.set(a.adsetId, [...(map.get(a.adsetId) ?? []), a]);
+    return map;
   }, [ads]);
 
   const counts = useMemo(() => {
@@ -61,8 +79,43 @@ export function AdAudit({
     return { adSets: adSets.length, ads: ads.length, ...byType };
   }, [ads, adSets]);
 
-  const money = (v: number | null) =>
-    v === null ? null : `${currency ? currency + " " : ""}${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+  function toggleCampaign(id: string) {
+    setExpandedCampaigns((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  function toggleAdSet(id: string) {
+    setExpandedAdSets((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  type TreeRow =
+    | { kind: "campaign"; campaign: AdCampaign; adSetCount: number }
+    | { kind: "adset"; adSet: AdSet; adCount: number }
+    | { kind: "ad"; ad: Ad };
+
+  const rows = useMemo(() => {
+    const out: TreeRow[] = [];
+    for (const c of campaigns) {
+      const cAdSets = adSetsByCampaign.get(c.id) ?? [];
+      out.push({ kind: "campaign", campaign: c, adSetCount: cAdSets.length });
+      if (!expandedCampaigns.has(c.id)) continue;
+      for (const s of cAdSets) {
+        const sAds = adsByAdSet.get(s.id) ?? [];
+        out.push({ kind: "adset", adSet: s, adCount: sAds.length });
+        if (!expandedAdSets.has(s.id)) continue;
+        for (const a of sAds) out.push({ kind: "ad", ad: a });
+      }
+    }
+    return out;
+  }, [campaigns, adSetsByCampaign, adsByAdSet, expandedCampaigns, expandedAdSets]);
 
   const filteredAds = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -85,22 +138,25 @@ export function AdAudit({
         <MetricCard label="Carousels" value={counts.CAROUSEL} loading={loading} help="Ad copies running a multi-card carousel." />
       </div>
 
-      {/* Ad sets */}
+      {/* Campaigns → ad sets → ad copies */}
       <Card className="overflow-hidden">
         <div className="border-b border-border px-5 py-4">
-          <h3 className="text-sm font-semibold">Ad sets</h3>
-          <p className="mt-0.5 text-xs text-muted-foreground">Every ad set in this account, grouped under its campaign.</p>
+          <h3 className="text-sm font-semibold">Campaigns</h3>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Click a campaign to open its ad sets, then an ad set to open its ad copies. Hover an ad copy to see the actual creative.
+          </p>
         </div>
+
         {loading ? (
-          <div className="h-32 animate-pulse bg-muted/40" />
-        ) : adSets.length === 0 ? (
-          <EmptyState icon={Layers} title="No ad sets" description="This account has no ad sets yet." className="border-0 bg-transparent py-10" />
+          <div className="h-40 animate-pulse bg-muted/40" />
+        ) : campaigns.length === 0 ? (
+          <EmptyState icon={Megaphone} title="No campaigns" description="This ad account has no campaigns yet." className="border-0 bg-transparent py-10" />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[820px] text-sm">
+            <table className="w-full min-w-[880px] text-sm">
               <thead>
                 <tr className="border-b border-border text-left">
-                  {["Ad set", "Campaign", "Ads", "Status", "Spend", "Purchases", "Purchase value", "ROAS"].map((h) => (
+                  {["Name", "Status", "Spend", "Clicks", "Purchases", "Purchase value", "ROAS"].map((h) => (
                     <th key={h} className="px-5 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                       {h}
                     </th>
@@ -108,32 +164,103 @@ export function AdAudit({
                 </tr>
               </thead>
               <tbody>
-                {adSets.map((s) => (
-                  <tr key={s.id} className="border-b border-border/60 last:border-0 hover:bg-muted/30">
-                    <td className="max-w-[240px] truncate px-5 py-3 font-medium">{s.name}</td>
-                    <td className="max-w-[200px] truncate px-5 py-3 text-muted-foreground">{campaignName.get(s.campaignId) ?? "—"}</td>
-                    <NumCell v={adsPerAdSet.get(s.id) ?? 0} />
-                    <td className="px-5 py-3">
-                      <StatusDot state={s.status === "ACTIVE" ? "connected" : "disconnected"} label={s.status.toLowerCase()} />
-                    </td>
-                    <NumCell v={s.insights.spend} fmt={money} />
-                    <NumCell v={s.insights.conversions} />
-                    <NumCell v={s.insights.purchaseValue} fmt={money} />
-                    <NumCell v={s.insights.roas} fmt={(x) => (x === null ? null : `${x.toFixed(2)}×`)} />
-                  </tr>
-                ))}
+                {rows.map((row) => {
+                  if (row.kind === "campaign") {
+                    const c = row.campaign;
+                    const open = expandedCampaigns.has(c.id);
+                    return (
+                      <tr key={`c-${c.id}`} className="border-b border-border/60 bg-muted/20 hover:bg-muted/30">
+                        <td className="px-5 py-3">
+                          <button onClick={() => toggleCampaign(c.id)} className="flex w-full items-center gap-2 text-left">
+                            <ChevronRight className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
+                            <span className="max-w-[260px] truncate font-medium">{c.name}</span>
+                            <Badge variant="secondary" className="shrink-0 text-[10px]">
+                              {row.adSetCount} ad set{row.adSetCount === 1 ? "" : "s"}
+                            </Badge>
+                          </button>
+                        </td>
+                        <td className="px-5 py-3">
+                          <StatusDot state={c.status === "ACTIVE" ? "connected" : "disconnected"} label={c.status.toLowerCase()} />
+                        </td>
+                        <NumCell v={c.insights.spend} fmt={(v) => money(currency, v)} />
+                        <NumCell v={c.insights.clicks} />
+                        <NumCell v={c.insights.conversions} />
+                        <NumCell v={c.insights.purchaseValue} fmt={(v) => money(currency, v)} />
+                        <NumCell v={c.insights.roas} fmt={roasFmt} />
+                      </tr>
+                    );
+                  }
+
+                  if (row.kind === "adset") {
+                    const s = row.adSet;
+                    const open = expandedAdSets.has(s.id);
+                    return (
+                      <tr key={`s-${s.id}`} className="border-b border-border/60 hover:bg-muted/20">
+                        <td className="py-2.5 pl-9 pr-5">
+                          <button onClick={() => toggleAdSet(s.id)} className="flex w-full items-center gap-2 text-left">
+                            <ChevronRight className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
+                            <Layers className="size-3.5 shrink-0 text-muted-foreground" />
+                            <span className="max-w-[220px] truncate text-[13px]">{s.name}</span>
+                            <Badge variant="secondary" className="shrink-0 text-[10px]">
+                              {row.adCount} ad{row.adCount === 1 ? "" : "s"}
+                            </Badge>
+                          </button>
+                        </td>
+                        <td className="py-2.5 pr-5">
+                          <StatusDot state={s.status === "ACTIVE" ? "connected" : "disconnected"} label={s.status.toLowerCase()} />
+                        </td>
+                        <NumCell v={s.insights.spend} fmt={(v) => money(currency, v)} />
+                        <NumCell v={s.insights.clicks} />
+                        <NumCell v={s.insights.conversions} />
+                        <NumCell v={s.insights.purchaseValue} fmt={(v) => money(currency, v)} />
+                        <NumCell v={s.insights.roas} fmt={roasFmt} />
+                      </tr>
+                    );
+                  }
+
+                  const a = row.ad;
+                  return (
+                    <tr
+                      key={`a-${a.id}`}
+                      onClick={() => setDetailAd(a)}
+                      className="cursor-pointer border-b border-border/60 last:border-0 hover:bg-muted/20"
+                    >
+                      <td className="py-2 pl-16 pr-5">
+                        <div className="flex items-center gap-2.5">
+                          <CreativeHoverPreview creative={a.creative}>
+                            <CreativeThumb creative={a.creative} size="sm" />
+                          </CreativeHoverPreview>
+                          <div className="min-w-0">
+                            <p className="max-w-[200px] truncate text-[13px] font-medium">{a.creative?.title || a.name}</p>
+                            <p className="line-clamp-1 max-w-[200px] text-[11px] text-muted-foreground">
+                              {a.creative?.bodyText || "No ad copy text"}
+                            </p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="py-2 pr-5">
+                        <StatusDot state={a.status === "ACTIVE" ? "connected" : "disconnected"} label={a.status.toLowerCase()} />
+                      </td>
+                      <NumCell v={a.insights.spend} fmt={(v) => money(currency, v)} />
+                      <NumCell v={a.insights.clicks} />
+                      <NumCell v={a.insights.conversions} />
+                      <NumCell v={a.insights.purchaseValue} fmt={(v) => money(currency, v)} />
+                      <NumCell v={a.insights.roas} fmt={roasFmt} />
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
       </Card>
 
-      {/* Ad copies */}
+      {/* Ad copies — searchable across every campaign */}
       <Card className="overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
           <div>
-            <h3 className="text-sm font-semibold">Ad copies</h3>
-            <p className="mt-0.5 text-xs text-muted-foreground">Every ad, its creative and the sales it produced.</p>
+            <h3 className="text-sm font-semibold">Every ad copy</h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">Search or filter across all campaigns at once.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <div className="relative">
@@ -186,7 +313,9 @@ export function AdAudit({
                     className="cursor-pointer border-b border-border/60 last:border-0 hover:bg-muted/30"
                   >
                     <td className="px-5 py-3">
-                      <CreativeThumb creative={ad.creative} />
+                      <CreativeHoverPreview creative={ad.creative}>
+                        <CreativeThumb creative={ad.creative} />
+                      </CreativeHoverPreview>
                     </td>
                     <td className="max-w-[280px] px-5 py-3">
                       <p className="truncate font-medium">{ad.creative?.title || ad.name}</p>
@@ -198,11 +327,11 @@ export function AdAudit({
                     <td className="px-5 py-3">
                       <StatusDot state={ad.status === "ACTIVE" ? "connected" : "disconnected"} label={ad.status.toLowerCase()} />
                     </td>
-                    <NumCell v={ad.insights.spend} fmt={money} />
+                    <NumCell v={ad.insights.spend} fmt={(v) => money(currency, v)} />
                     <NumCell v={ad.insights.clicks} />
                     <NumCell v={ad.insights.conversions} />
-                    <NumCell v={ad.insights.purchaseValue} fmt={money} />
-                    <NumCell v={ad.insights.roas} fmt={(x) => (x === null ? null : `${x.toFixed(2)}×`)} />
+                    <NumCell v={ad.insights.purchaseValue} fmt={(v) => money(currency, v)} />
+                    <NumCell v={ad.insights.roas} fmt={roasFmt} />
                   </tr>
                 ))}
               </tbody>
@@ -223,22 +352,111 @@ export function AdAudit({
   );
 }
 
-function CreativeThumb({ creative }: { creative: AdCreative | null }) {
+/* ------------------------------ hover preview ------------------------------ */
+
+const videoSourceCache = new Map<string, string | null>();
+
+/**
+ * Wraps a thumbnail. On hover, floats an enlarged preview near the cursor —
+ * the actual image for a static ad, or the actual video playing muted for a
+ * Reel. The video file is fetched lazily, once per video id, only when
+ * someone actually hovers it — never in bulk with the ad list.
+ */
+function CreativeHoverPreview({ creative, children }: { creative: AdCreative | null; children: React.ReactNode }) {
+  const [show, setShow] = useState(false);
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  /** Only the freshly-fetched result — an already-cached video reads straight from `videoSourceCache` below, no state round-trip needed. */
+  const [fetchedSrc, setFetchedSrc] = useState<string | null>(null);
+  const [videoLoading, setVideoLoading] = useState(false);
+  const fetchedFor = useRef<string | null>(null);
+
+  const src = creative?.imageUrl || creative?.thumbnailUrl;
+  const isVideo = creative?.mediaType === "VIDEO" && Boolean(creative.videoId);
+  const cachedSrc = creative?.videoId ? videoSourceCache.get(creative.videoId) : undefined;
+  const videoSrc = cachedSrc !== undefined ? cachedSrc : fetchedSrc;
+
+  useEffect(() => {
+    if (!show || !isVideo) return;
+    const videoId = creative?.videoId;
+    if (!videoId) return;
+    if (fetchedFor.current === videoId || videoSourceCache.has(videoId)) return;
+    fetchedFor.current = videoId;
+
+    setVideoLoading(true);
+    api.integrations
+      .adVideoSource(videoId)
+      .then((r) => {
+        videoSourceCache.set(videoId, r.source);
+        setFetchedSrc(r.source);
+      })
+      .catch(() => videoSourceCache.set(videoId, null))
+      .finally(() => setVideoLoading(false));
+  }, [show, isVideo, creative]);
+
+  if (!src) return <>{children}</>;
+
+  function handleEnter(e: React.MouseEvent<HTMLDivElement>) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const width = 240;
+    const left = Math.min(rect.right + 12, window.innerWidth - width - 12);
+    const top = Math.min(rect.top, window.innerHeight - 320);
+    setPos({ left, top: Math.max(12, top) });
+    setShow(true);
+  }
+
+  return (
+    <div className="relative inline-flex" onMouseEnter={handleEnter} onMouseLeave={() => setShow(false)}>
+      {children}
+      {show &&
+        pos &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            style={{ position: "fixed", left: pos.left, top: pos.top, width: 240 }}
+            className="pointer-events-none z-[100] overflow-hidden rounded-xl border border-border bg-popover shadow-glow"
+          >
+            {isVideo ? (
+              videoSrc ? (
+                <video src={videoSrc} autoPlay muted loop playsInline className="aspect-[4/5] w-full bg-black object-contain" />
+              ) : (
+                <div className="relative aspect-[4/5] w-full">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={src} alt="" className="size-full object-cover" />
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                    {videoLoading ? <Loader2 className="size-6 animate-spin text-white" /> : <PlayCircle className="size-8 text-white/90" />}
+                  </div>
+                </div>
+              )
+            ) : (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={src} alt="" className="max-h-80 w-full object-cover" />
+            )}
+            {creative?.bodyText && (
+              <p className="max-h-16 overflow-hidden px-3 py-2 text-[11px] leading-snug text-muted-foreground">{creative.bodyText}</p>
+            )}
+          </div>,
+          document.body
+        )}
+    </div>
+  );
+}
+
+function CreativeThumb({ creative, size = "md" }: { creative: AdCreative | null; size?: "sm" | "md" }) {
   const meta = MEDIA_META[creative?.mediaType ?? "UNKNOWN"];
   const src = creative?.thumbnailUrl || creative?.imageUrl;
   return (
-    <div className="relative size-12 shrink-0 overflow-hidden rounded-lg border border-border bg-muted">
+    <div className={cn("relative shrink-0 overflow-hidden rounded-lg border border-border bg-muted", size === "sm" ? "size-9" : "size-12")}>
       {src ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={src} alt="" className="size-full object-cover" />
       ) : (
         <div className="flex size-full items-center justify-center text-muted-foreground/50">
-          <meta.icon className="size-5" />
+          <meta.icon className={size === "sm" ? "size-4" : "size-5"} />
         </div>
       )}
       {creative?.mediaType === "VIDEO" && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/20">
-          <PlayCircle className="size-5 text-white drop-shadow" />
+          <PlayCircle className={cn("text-white drop-shadow", size === "sm" ? "size-4" : "size-5")} />
         </div>
       )}
     </div>
@@ -267,20 +485,19 @@ function AdDetailDialog({
 }) {
   const meta = MEDIA_META[ad?.creative?.mediaType ?? "UNKNOWN"];
   const src = ad?.creative?.imageUrl || ad?.creative?.thumbnailUrl;
-  const money = (v: number | null | undefined) =>
-    v == null ? "—" : `${currency ? currency + " " : ""}${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+  const fmtMoney = (v: number | null | undefined) => (v == null ? "—" : money(currency, v) ?? "—");
   const adsManagerUrl = `https://adsmanager.facebook.com/adsmanager/manage/ads?act=${numericAccountId}&selected_ad_ids=${ad?.id ?? ""}`;
 
   const metrics: { label: string; value: string }[] = [
-    { label: "Spend", value: money(ad?.insights.spend) },
+    { label: "Spend", value: fmtMoney(ad?.insights.spend) },
     { label: "Impressions", value: ad?.insights.impressions?.toLocaleString() ?? "—" },
     { label: "Reach", value: ad?.insights.reach?.toLocaleString() ?? "—" },
     { label: "Clicks", value: ad?.insights.clicks?.toLocaleString() ?? "—" },
-    { label: "CTR", value: ad?.insights.ctr != null ? `${ad.insights.ctr.toFixed(2)}%` : "—" },
-    { label: "Cost / click", value: money(ad?.insights.cpc) },
+    { label: "CTR", value: pct(ad?.insights.ctr ?? null) ?? "—" },
+    { label: "Cost / click", value: fmtMoney(ad?.insights.cpc) },
     { label: "Purchases", value: ad?.insights.conversions?.toLocaleString() ?? "—" },
-    { label: "Purchase value", value: money(ad?.insights.purchaseValue) },
-    { label: "ROAS", value: ad?.insights.roas != null ? `${ad.insights.roas.toFixed(2)}×` : "—" },
+    { label: "Purchase value", value: fmtMoney(ad?.insights.purchaseValue) },
+    { label: "ROAS", value: roasFmt(ad?.insights.roas ?? null) ?? "—" },
   ];
 
   return (

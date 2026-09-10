@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Megaphone, AlertTriangle, RefreshCw } from "lucide-react";
+import { AlertTriangle, RefreshCw } from "lucide-react";
 import {
   api, ApiRequestError,
   type Ad, type AdAccount, type AdCampaign, type AdDatePreset, type AdInsights, type AdSet, type AdsAvailability,
@@ -11,7 +11,6 @@ import { MetricCard } from "@/components/analytics/metric-card";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/ui/status-dot";
-import { EmptyState } from "@/components/ui/page-shell";
 import { AdAudit } from "@/components/meta/ad-audit";
 import { cn } from "@/lib/utils";
 
@@ -252,60 +251,7 @@ export default function MetaAdsPage() {
           {/* Plain-language summary, generated from the actual figures. */}
           {!stale && insights && insights.spend !== null && <AdSummary insights={insights} currency={currency} />}
 
-          {/* Campaigns */}
-          <Card className="overflow-hidden">
-            <div className="border-b border-border px-5 py-4">
-              <h3 className="text-sm font-semibold">Campaigns</h3>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                Campaigns with no figures had no activity in this period.
-              </p>
-            </div>
-
-            {stale || campaigns === null ? (
-              <div className="h-40 animate-pulse bg-muted/40" />
-            ) : campaigns.length === 0 ? (
-              <EmptyState
-                icon={Megaphone} title="No campaigns"
-                description="This ad account has no campaigns yet."
-                className="border-0 bg-transparent py-10"
-              />
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[820px] text-sm">
-                  <thead>
-                    <tr className="border-b border-border text-left">
-                      {["Campaign", "Status", "Spend", "Reach", "Clicks", "CTR", "Cost/click", "Conversions"].map((h) => (
-                        <th key={h} className="px-5 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                          {h}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {campaigns.map((c) => (
-                      <tr key={c.id} className="border-b border-border/60 last:border-0 hover:bg-muted/30">
-                        <td className="max-w-[260px] truncate px-5 py-3 font-medium">{c.name}</td>
-                        <td className="px-5 py-3">
-                          <StatusDot
-                            state={c.status === "ACTIVE" ? "connected" : "disconnected"}
-                            label={c.status === "ACTIVE" ? "Active" : c.status.toLowerCase()}
-                          />
-                        </td>
-                        <Num v={c.insights.spend} fmt={money} />
-                        <Num v={c.insights.reach} />
-                        <Num v={c.insights.clicks} />
-                        <Num v={c.insights.ctr} fmt={(x) => (x === null ? null : `${x.toFixed(2)}%`)} />
-                        <Num v={c.insights.cpc} fmt={money} />
-                        <Num v={c.insights.conversions} />
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </Card>
-
-          {/* Full audit: every ad set, every ad copy, and the sales each one produced. */}
+          {/* Campaigns → ad sets → ad copies, and the sales each one produced. */}
           {auditError && (
             <Card className="flex items-start gap-3 border-danger/30 bg-danger/[0.06] p-4">
               <AlertTriangle className="mt-0.5 size-4 shrink-0 text-danger" />
@@ -328,15 +274,6 @@ export default function MetaAdsPage() {
 
       {availability === null && <Card className="h-40 animate-pulse bg-muted/40" />}
     </motion.div>
-  );
-}
-
-function Num({ v, fmt }: { v: number | null; fmt?: (n: number | null) => string | null }) {
-  const text = fmt ? fmt(v) : v === null ? null : v.toLocaleString();
-  return (
-    <td className={cn("px-5 py-3 tabular-nums", text === null && "text-muted-foreground/40")}>
-      {text ?? "—"}
-    </td>
   );
 }
 

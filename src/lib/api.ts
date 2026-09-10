@@ -716,6 +716,9 @@ export const api = {
       get<{ adSets: AdSet[] }>(`/api/meta-ads/adsets?accountId=${encodeURIComponent(accountId)}&preset=${preset}`),
     ads: (accountId: string, preset: AdDatePreset = "last_30d") =>
       get<{ ads: Ad[] }>(`/api/meta-ads/ads?accountId=${encodeURIComponent(accountId)}&preset=${preset}`),
+    /** Lazy, on-demand — called only when a video ad's thumbnail is hovered. */
+    adVideoSource: (videoId: string) =>
+      get<{ source: string | null; thumbnailUrl: string | null }>(`/api/meta-ads/video/${encodeURIComponent(videoId)}`),
 
     /* --- Facebook Pages -------------------------------------------------- */
     facebookPages: () => get<{ pages: FacebookPage[] }>("/api/facebook/pages"),

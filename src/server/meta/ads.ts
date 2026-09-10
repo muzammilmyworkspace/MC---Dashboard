@@ -376,6 +376,21 @@ export async function listAds(accountId: string, preset: DatePreset, limit = 200
   }));
 }
 
+/* ------------------------------ Video preview ------------------------------ */
+
+/**
+ * The playable file behind a creative's video, for the hover preview.
+ *
+ * Deliberately not fetched in bulk alongside `listAds` — that is exactly the
+ * per-row-expansion pattern that timed out the ads list before. This is
+ * called once, on demand, only for the one video someone is actually
+ * hovering over.
+ */
+export async function getVideoSource(videoId: string): Promise<{ source: string | null; thumbnailUrl: string | null }> {
+  const res = await ads<{ source?: string; picture?: string }>(videoId, { fields: "source,picture" }, 10 * 60_000);
+  return { source: res.source ?? null, thumbnailUrl: res.picture ?? null };
+}
+
 /* ------------------------------ Availability ------------------------------ */
 
 export interface AdsAvailability {
