@@ -9,9 +9,10 @@ import {
 import {
   api, ApiRequestError,
   type MetaCapability, type MetaComment, type MetaConnectionStatus,
-  type MetaInsightsResponse, type MetaMediaItem, type MetaMessagesResponse, type MetaProfileResponse,
+  type MetaInsightsResponse, type MetaMediaItem, type MetaProfileResponse,
 } from "@/lib/api";
 import { SectionCard, EmptyState, StatusPill } from "@/components/ui/page-shell";
+import { MessagesInbox } from "./messages-inbox";
 import { StatusDot } from "@/components/ui/status-dot";
 import { Tooltip } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
@@ -654,38 +655,7 @@ function CommentsTab({ capability }: { capability?: MetaCapability }) {
 }
 
 function MessagesTab() {
-  const [data, setData] = useState<MetaMessagesResponse | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const res = await api.integrations.metaMessages().catch(() => null);
-      if (!cancelled) setData(res);
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
-  if (!data) return <Card className="h-32 animate-pulse bg-muted/40" />;
-
-  if (data.setupRequired) {
-    return (
-      <div className="flex items-start gap-3 rounded-xl border border-warning/30 bg-warning/[0.06] p-4">
-        <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
-        <div>
-          <p className="text-sm font-medium">Setup required — Instagram messaging</p>
-          <p className="mt-0.5 text-xs text-muted-foreground">{data.reason}</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Conversations arrive by webhook rather than polling, so both the permission and an active
-            subscription are needed before anything appears here.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <EmptyState icon={Inbox} title="No conversations yet" description="New Instagram messages will appear here." />
-  );
+  return <MessagesInbox />;
 }
 
 /* ------------------------------- Bits ------------------------------------ */

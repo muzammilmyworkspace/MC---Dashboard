@@ -111,7 +111,8 @@ export function onAccessTokenChange(fn: (t: string | null) => void) {
 
 async function raw<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
   const headers = new Headers(init.headers);
-  if (!headers.has("Content-Type") && init.body) headers.set("Content-Type", "application/json");
+  // FormData must keep the multipart boundary the browser generates for it — forcing JSON here breaks file uploads.
+  if (!headers.has("Content-Type") && init.body && !(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
   if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
 
   const res = await fetch(`${API_URL}${path}`, { ...init, headers, credentials: "include" });
@@ -504,8 +505,38 @@ export interface MetaComment {
   replies: { id: string; text: string; username: string; timestamp: string }[];
 }
 
+export type IgMsgDirection = "INBOUND" | "OUTBOUND";
+export type IgMsgType = "TEXT" | "IMAGE" | "VIDEO" | "AUDIO" | "STORY_REPLY" | "UNSUPPORTED";
+export type IgMsgStatus = "SENT" | "FAILED";
+
+export interface MetaConversation {
+  id: string;
+  igUsername: string | null;
+  igName: string | null;
+  profilePicUrl: string | null;
+  lastMessageAt: string | null;
+  lastMessagePreview: string;
+  lastMessageDirection: IgMsgDirection | null;
+  unread: boolean;
+  /** Last message was inbound and it's been 24h+ — Meta will reject a plain reply to these. */
+  unrepliedOver24h: boolean;
+}
+
+export interface MetaMessage {
+  id: string;
+  conversationId: string;
+  direction: IgMsgDirection;
+  type: IgMsgType;
+  text: string;
+  mediaUrl: string | null;
+  status: IgMsgStatus;
+  error: string | null;
+  sentAt: string;
+  sentByUserId: string | null;
+}
+
 export interface MetaMessagesResponse extends MetaMessagingReadiness {
-  conversations: unknown[];
+  conversations: MetaConversation[];
   setupRequired: boolean;
 }
 
@@ -700,7 +731,27 @@ export const api = {
       post<{ id: string }>("/api/integrations/meta-graph/comments/reply", { commentId, message }),
     metaHideComment: (commentId: string, hide: boolean) =>
       post<{ ok: boolean; hidden: boolean }>("/api/integrations/meta-graph/comments/hide", { commentId, hide }),
-    metaMessages: () => get<MetaMessagesResponse>("/api/integrations/meta-graph/messages"),
+    metaMessages: (opts: { search?: string; unrepliedOver24h?: boolean } = {}) => {
+      const qs = new URLSearchParams();
+      if (opts.search) qs.set("search", opts.search);
+      if (opts.unrepliedOver24h) qs.set("unrepliedOver24h", "true");
+      const suffix = qs.toString() ? `?${qs}` : "";
+      return get<MetaMessagesResponse>(`/api/integrations/meta-graph/messages${suffix}`);
+    },
+    metaThread: (conversationId: string) =>
+      get<{ conversation: MetaConversation; messages: MetaMessage[] }>(
+        `/api/integrations/meta-graph/messages/${encodeURIComponent(conversationId)}`
+      ),
+    metaSendText: (conversationId: string, text: string) =>
+      post<{ message: MetaMessage }>(`/api/integrations/meta-graph/messages/${encodeURIComponent(conversationId)}`, { text }),
+    metaSendAudio: (conversationId: string, audio: Blob, filename = "voice-note.webm") => {
+      const form = new FormData();
+      form.set("audio", audio, filename);
+      return raw<{ message: MetaMessage }>(`/api/integrations/meta-graph/messages/${encodeURIComponent(conversationId)}/audio`, {
+        method: "POST",
+        body: form,
+      });
+    },
 
     /* --- Meta Ads (Marketing API) --------------------------------------- */
     adAccounts: () => get<AdsAvailability>("/api/meta-ads/accounts"),

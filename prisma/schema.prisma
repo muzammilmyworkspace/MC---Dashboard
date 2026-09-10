@@ -113,6 +113,7 @@ model User {
   @@index([role])
   landingPages LandingPage[]
   blogs        Blog[]
+  igMessages   IgMessage[]
 }
 
 /* -------------------------------- Tasks -------------------------------- */
@@ -733,4 +734,77 @@ model Blog {
   updatedAt DateTime @updatedAt
 
   @@index([status, publishedAt])
+}
+
+/* ------------------------------ Instagram DMs ---------------------------- */
+
+enum IgMsgDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum IgMsgType {
+  TEXT
+  IMAGE
+  VIDEO
+  AUDIO
+  STORY_REPLY
+  UNSUPPORTED
+}
+
+enum IgMsgStatus {
+  SENT
+  FAILED
+}
+
+/**
+ * One row per Instagram contact who has messaged the connected account — the
+ * contact's Instagram-scoped id (IGSID) is the primary key, so there is
+ * exactly one conversation per person by construction, no separate lookup.
+ */
+model IgConversation {
+  id            String @id
+  igUsername    String?
+  igName        String?
+  profilePicUrl String?
+
+  /**
+   * Denormalized onto the conversation so the inbox list never has to join
+   * against messages to render or filter — including the 24h-no-reply
+   * filter, which reads directly off these two fields.
+   */
+  lastMessageAt       DateTime?
+  lastMessagePreview  String    @default("")
+  lastMessageDirection IgMsgDirection?
+
+  unread Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages IgMessage[]
+
+  @@index([lastMessageAt])
+}
+
+model IgMessage {
+  id             String         @id @default(cuid())
+  conversationId String
+  conversation   IgConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  direction IgMsgDirection
+  type      IgMsgType   @default(TEXT)
+  text      String      @default("")
+  /** Meta's hosted URL for an inbound attachment, or our own Vercel Blob copy for an outbound voice note. */
+  mediaUrl  String?
+  status    IgMsgStatus @default(SENT)
+  error     String?
+
+  sentAt DateTime @default(now())
+
+  /** Who on the team sent it — null for inbound messages. */
+  sentByUserId String?
+  sentByUser   User?   @relation(fields: [sentByUserId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId, sentAt])
 }
