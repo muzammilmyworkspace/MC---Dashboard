@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 import {
   api, ApiRequestError,
-  type Ad, type AdAccount, type AdCampaign, type AdDatePreset, type AdInsights, type AdSet, type AdsAvailability,
+  type AdAccount, type AdCampaign, type AdDatePreset, type AdInsights, type AdsAvailability,
 } from "@/lib/api";
 import { MetricCard } from "@/components/analytics/metric-card";
 import { Card } from "@/components/ui/card";
@@ -28,11 +28,7 @@ export default function MetaAdsPage() {
   const [preset, setPreset] = useState<AdDatePreset>("last_30d");
   const [insights, setInsights] = useState<AdInsights | null>(null);
   const [campaigns, setCampaigns] = useState<AdCampaign[] | null>(null);
-  const [adSets, setAdSets] = useState<AdSet[] | null>(null);
-  const [ads, setAds] = useState<Ad[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  /** Separate from `error` on purpose — a slow or failing audit call must never blank the KPIs and Campaigns above it. */
-  const [auditError, setAuditError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
 
   useEffect(() => {
@@ -52,10 +48,8 @@ export default function MetaAdsPage() {
    * effect body is what triggers the cascading-render warning.
    */
   const [loadedFor, setLoadedFor] = useState<string | null>(null);
-  const [auditLoadedFor, setAuditLoadedFor] = useState<string | null>(null);
   const requestKey = account ? `${account.id}:${preset}:${reload}` : null;
   const stale = requestKey !== null && loadedFor !== requestKey;
-  const auditStale = requestKey !== null && auditLoadedFor !== requestKey;
 
   useEffect(() => {
     if (!account || !requestKey) return;
@@ -77,38 +71,6 @@ export default function MetaAdsPage() {
         setCampaigns([]);
       } finally {
         if (!cancelled) setLoadedFor(requestKey);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [account, preset, requestKey]);
-
-  /**
-   * The ad-set and ad-copy audit, fetched independently of the KPIs above.
-   * It reads more from Meta (every ad set, every ad, each with its own
-   * creative) and can occasionally be slower or fail on its own — that must
-   * never take the Spend/Reach/Campaigns section down with it.
-   */
-  useEffect(() => {
-    if (!account || !requestKey) return;
-    let cancelled = false;
-
-    void (async () => {
-      try {
-        const [s, a] = await Promise.all([
-          api.integrations.adSets(account.id, preset),
-          api.integrations.ads(account.id, preset),
-        ]);
-        if (cancelled) return;
-        setAdSets(s.adSets);
-        setAds(a.ads);
-        setAuditError(null);
-      } catch (err) {
-        if (cancelled) return;
-        setAuditError(err instanceof ApiRequestError ? err.message : "Couldn't load the ad set / ad copy audit.");
-        setAdSets([]);
-        setAds([]);
-      } finally {
-        if (!cancelled) setAuditLoadedFor(requestKey);
       }
     })();
     return () => { cancelled = true; };
@@ -252,22 +214,14 @@ export default function MetaAdsPage() {
           {!stale && insights && insights.spend !== null && <AdSummary insights={insights} currency={currency} />}
 
           {/* Campaigns → ad sets → ad copies, and the sales each one produced. */}
-          {auditError && (
-            <Card className="flex items-start gap-3 border-danger/30 bg-danger/[0.06] p-4">
-              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-danger" />
-              <div>
-                <p className="text-sm font-medium">Couldn&apos;t load the ad set / ad copy audit</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">{auditError}</p>
-              </div>
-            </Card>
-          )}
           <AdAudit
+            key={`${account?.id ?? ""}:${preset}`}
+            accountId={account?.id ?? ""}
             numericAccountId={account?.accountId ?? ""}
             currency={currency}
-            loading={auditStale || campaigns === null || adSets === null || ads === null}
+            preset={preset}
+            loading={stale || campaigns === null}
             campaigns={campaigns ?? []}
-            adSets={adSets ?? []}
-            ads={ads ?? []}
           />
         </>
       )}

@@ -712,9 +712,14 @@ export const api = {
       get<{ campaigns: AdCampaign[] }>(
         `/api/meta-ads/campaigns?accountId=${encodeURIComponent(accountId)}&preset=${preset}`
       ),
-    adSets: (accountId: string, preset: AdDatePreset = "last_30d") =>
-      get<{ adSets: AdSet[] }>(`/api/meta-ads/adsets?accountId=${encodeURIComponent(accountId)}&preset=${preset}`),
-    ads: (accountId: string, preset: AdDatePreset = "last_30d") =>
+    /** Ad sets under one campaign — fetched when that campaign is expanded, not for the whole account at once. */
+    adSetsForCampaign: (campaignId: string, preset: AdDatePreset = "last_30d") =>
+      get<{ adSets: AdSet[] }>(`/api/meta-ads/adsets?campaignId=${encodeURIComponent(campaignId)}&preset=${preset}`),
+    /** Ads under one ad set — fetched when that ad set is expanded. */
+    adsForAdSet: (adsetId: string, preset: AdDatePreset = "last_30d") =>
+      get<{ ads: Ad[] }>(`/api/meta-ads/ads?adsetId=${encodeURIComponent(adsetId)}&preset=${preset}`),
+    /** Every ad with activity in the period, account-wide — for the searchable "every ad copy" list. */
+    activeAds: (accountId: string, preset: AdDatePreset = "last_30d") =>
       get<{ ads: Ad[] }>(`/api/meta-ads/ads?accountId=${encodeURIComponent(accountId)}&preset=${preset}`),
     /** Lazy, on-demand — called only when a video ad's thumbnail is hovered. */
     adVideoSource: (videoId: string) =>

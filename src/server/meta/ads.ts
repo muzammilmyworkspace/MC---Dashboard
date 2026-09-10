@@ -205,18 +205,19 @@ export async function listCampaigns(accountId: string, preset: DatePreset, limit
  * Meta compute a separate aggregation per row — fine for a handful of
  * campaigns, but for dozens of ad sets or ads it regularly blew past
  * Vercel's 30s function limit and took the whole page down with it.
- * `act_X/insights?level=ad` asks for the same numbers as one report, which
- * is the query pattern Meta's own Ads Manager reporting uses and returns in
- * a fraction of the time.
+ * `.../insights?level=ad` asks for the same numbers as one report, which is
+ * the query pattern Meta's own Ads Manager reporting uses and returns in a
+ * fraction of the time. `nodeId` can be an account, a campaign or an ad
+ * set — the `/insights` edge exists on all three, scoped to that node.
  */
 async function insightsByLevel(
-  accountId: string,
+  nodeId: string,
   preset: DatePreset,
   level: "campaign" | "adset" | "ad",
   limit = 500
 ): Promise<Map<string, AdInsights>> {
   const idField = `${level}_id`;
-  const res = await ads<{ data?: (RawInsight & Record<string, string>)[] }>(`${accountId}/insights`, {
+  const res = await ads<{ data?: (RawInsight & Record<string, string>)[] }>(`${nodeId}/insights`, {
     level,
     fields: `${idField},${INSIGHT_FIELDS}`,
     date_preset: preset,
@@ -251,23 +252,27 @@ function minorToMajor(v: unknown): number | null {
 }
 
 /**
- * Every ad set in the account, tagged with its campaign — the audit groups
- * them client-side rather than one call per campaign. Metadata and insights
- * are fetched in parallel and merged by id, rather than nested, so a large
- * account doesn't time out (see `insightsByLevel`).
+ * Ad sets under one campaign — not the whole account.
+ *
+ * An account with years of history can hold thousands of ad sets across
+ * long-paused campaigns; pulling all of them up front is exactly what
+ * timed out before. Scoping to a single campaign's own `/adsets` edge
+ * keeps every call small regardless of how large the account's full
+ * history is — this is called when that one campaign is expanded, not
+ * before.
  */
-export async function listAdSets(accountId: string, preset: DatePreset, limit = 200): Promise<AdSet[]> {
+export async function listAdSetsForCampaign(campaignId: string, preset: DatePreset, limit = 200): Promise<AdSet[]> {
   const [res, insightsMap] = await Promise.all([
     ads<{
       data?: { id: string; name?: string; campaign_id?: string; status?: string; daily_budget?: string; lifetime_budget?: string }[];
-    }>(`${accountId}/adsets`, { fields: "id,name,campaign_id,status,daily_budget,lifetime_budget", limit }),
-    insightsByLevel(accountId, preset, "adset"),
+    }>(`${campaignId}/adsets`, { fields: "id,name,campaign_id,status,daily_budget,lifetime_budget", limit }),
+    insightsByLevel(campaignId, preset, "adset"),
   ]);
 
   return (res.data ?? []).map((s) => ({
     id: s.id,
     name: s.name ?? "(unnamed ad set)",
-    campaignId: s.campaign_id ?? "",
+    campaignId: s.campaign_id ?? campaignId,
     status: s.status ?? "UNKNOWN",
     dailyBudget: minorToMajor(s.daily_budget),
     lifetimeBudget: minorToMajor(s.lifetime_budget),
@@ -348,32 +353,62 @@ function parseCreative(raw: RawCreative | undefined): AdCreative | null {
 
 const CREATIVE_FIELDS = "id,name,thumbnail_url,image_url,body,title,object_type,video_id,object_story_spec";
 
-/**
- * Every ad in the account — the audit's actual unit. Each one carries its
- * own creative (the ad copy, the image or video) and its own insights, so
- * "which ad copy produced which sales" is answered directly, not estimated
- * from the ad set it sits in.
- */
-export async function listAds(accountId: string, preset: DatePreset, limit = 200): Promise<Ad[]> {
-  const [res, insightsMap] = await Promise.all([
-    ads<{
-      data?: {
-        id: string; name?: string; adset_id?: string; campaign_id?: string; status?: string;
-        creative?: RawCreative;
-      }[];
-    }>(`${accountId}/ads`, { fields: `id,name,adset_id,campaign_id,status,creative{${CREATIVE_FIELDS}}`, limit }),
-    insightsByLevel(accountId, preset, "ad"),
-  ]);
+interface RawAd {
+  id: string;
+  name?: string;
+  adset_id?: string;
+  campaign_id?: string;
+  status?: string;
+  creative?: RawCreative;
+}
 
-  return (res.data ?? []).map((a) => ({
-    id: a.id,
-    name: a.name ?? "(unnamed ad)",
-    adsetId: a.adset_id ?? "",
-    campaignId: a.campaign_id ?? "",
-    status: a.status ?? "UNKNOWN",
-    creative: parseCreative(a.creative),
-    insights: insightsMap.get(a.id) ?? shapeInsights(undefined),
-  }));
+function toAd(raw: RawAd, insightsMap: Map<string, AdInsights>): Ad {
+  return {
+    id: raw.id,
+    name: raw.name ?? "(unnamed ad)",
+    adsetId: raw.adset_id ?? "",
+    campaignId: raw.campaign_id ?? "",
+    status: raw.status ?? "UNKNOWN",
+    creative: parseCreative(raw.creative),
+    insights: insightsMap.get(raw.id) ?? shapeInsights(undefined),
+  };
+}
+
+const AD_FIELDS = `id,name,adset_id,campaign_id,status,creative{${CREATIVE_FIELDS}}`;
+
+/**
+ * Ads under one ad set — not the whole account, same reasoning as
+ * `listAdSetsForCampaign`. Called when that one ad set is expanded.
+ */
+export async function listAdsForAdSet(adsetId: string, preset: DatePreset, limit = 200): Promise<Ad[]> {
+  const [res, insightsMap] = await Promise.all([
+    ads<{ data?: RawAd[] }>(`${adsetId}/ads`, { fields: AD_FIELDS, limit }),
+    insightsByLevel(adsetId, preset, "ad"),
+  ]);
+  // The ad-set edge doesn't always echo adset_id back on each row; the id we scoped the call to is authoritative.
+  return (res.data ?? []).map((a) => toAd({ ...a, adset_id: a.adset_id ?? adsetId }, insightsMap));
+}
+
+/**
+ * Every ad that actually ran in the selected period, across the whole
+ * account — for the searchable "every ad copy" list.
+ *
+ * Not the account's full history: insights are read first (one fast
+ * aggregated report, naturally limited to ads with delivery in the
+ * period), then metadata is read for just those ids in one batched
+ * multi-id call. Reading metadata for every ad the account has ever
+ * created — years of paused campaigns included — is what timed out.
+ */
+export async function listActiveAdsForAccount(accountId: string, preset: DatePreset, limit = 200): Promise<Ad[]> {
+  const insightsMap = await insightsByLevel(accountId, preset, "ad", limit);
+  const ids = [...insightsMap.keys()];
+  if (ids.length === 0) return [];
+
+  const res = await ads<Record<string, RawAd>>("", { ids: ids.join(","), fields: AD_FIELDS });
+  return ids
+    .map((id) => res[id])
+    .filter((a): a is RawAd => Boolean(a))
+    .map((a) => toAd(a, insightsMap));
 }
 
 /* ------------------------------ Video preview ------------------------------ */
@@ -381,10 +416,10 @@ export async function listAds(accountId: string, preset: DatePreset, limit = 200
 /**
  * The playable file behind a creative's video, for the hover preview.
  *
- * Deliberately not fetched in bulk alongside `listAds` — that is exactly the
- * per-row-expansion pattern that timed out the ads list before. This is
- * called once, on demand, only for the one video someone is actually
- * hovering over.
+ * Deliberately not fetched in bulk alongside an ad list — that is exactly
+ * the per-row-expansion pattern that timed out before. This is called
+ * once, on demand, only for the one video someone is actually hovering
+ * over.
  */
 export async function getVideoSource(videoId: string): Promise<{ source: string | null; thumbnailUrl: string | null }> {
   const res = await ads<{ source?: string; picture?: string }>(videoId, { fields: "source,picture" }, 10 * 60_000);

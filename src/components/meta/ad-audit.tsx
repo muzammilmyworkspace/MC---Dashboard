@@ -3,13 +3,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  ChevronRight, ExternalLink, Image as ImageIcon, Layers, Loader2, Megaphone,
-  PlayCircle, Search, SquareStack,
+  AlertTriangle, ChevronRight, ExternalLink, Image as ImageIcon, Layers, Loader2, Megaphone,
+  PlayCircle, RefreshCw, Search, SquareStack,
 } from "lucide-react";
-import { api, type Ad, type AdCampaign, type AdCreative, type AdMediaType, type AdSet } from "@/lib/api";
+import { api, ApiRequestError, type Ad, type AdCampaign, type AdCreative, type AdDatePreset, type AdMediaType, type AdSet } from "@/lib/api";
 import { MetricCard } from "@/components/analytics/metric-card";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/ui/status-dot";
 import { Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/page-shell";
@@ -19,8 +20,15 @@ import { cn } from "@/lib/utils";
 /* ------------------------------------------------------------------ *
  *  Ad Audit — every campaign expands into its ad sets, every ad set
  *  expands into its ad copies, and hovering an ad copy shows the actual
- *  image or plays the actual Reel, so an audit never requires opening
- *  Ads Manager to see what's actually running.
+ *  image or plays the actual Reel.
+ *
+ *  This account has years of history — hundreds of ad sets and ads
+ *  across long-paused campaigns. Reading all of that up front is what
+ *  timed the page out before, so nothing here is fetched for the whole
+ *  account at once: ad sets load when their campaign is expanded, ads
+ *  load when their ad set is expanded, and the one account-wide call
+ *  (for the searchable list below) asks Meta for activity in the
+ *  selected period only, not the account's full history.
  * ------------------------------------------------------------------ */
 
 const MEDIA_META: Record<AdMediaType, { label: string; icon: typeof ImageIcon }> = {
@@ -36,108 +44,129 @@ const money = (currency: string, v: number | null) =>
   v === null ? null : `${currency ? currency + " " : ""}${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 const pct = (v: number | null) => (v === null ? null : `${v.toFixed(2)}%`);
 const roasFmt = (v: number | null) => (v === null ? null : `${v.toFixed(2)}×`);
+const errMsg = (err: unknown, fallback: string) => (err instanceof ApiRequestError ? err.message : fallback);
+
+type LoadState<T> = { status: "loading" } | { status: "error"; message: string } | { status: "ready"; data: T };
 
 export function AdAudit({
+  accountId,
   numericAccountId,
   currency,
+  preset,
   loading,
   campaigns,
-  adSets,
-  ads,
 }: {
+  /** "act_123…" — used for the account-wide "active ads" call. */
+  accountId: string;
   numericAccountId: string;
   currency: string;
+  preset: AdDatePreset;
+  /** True while `campaigns` itself is still loading. */
   loading: boolean;
   campaigns: AdCampaign[];
-  adSets: AdSet[];
-  ads: Ad[];
 }) {
-  const [query, setQuery] = useState("");
-  const [mediaFilter, setMediaFilter] = useState<MediaFilter>("ALL");
-  const [detailAd, setDetailAd] = useState<Ad | null>(null);
+  // Every cached child (expanded rows, loaded ad sets/ads) needs to reset
+  // when the account or date range changes. Rather than an effect that
+  // clears state — which triggers an extra render pass — the caller keys
+  // this component on `${accountId}:${preset}`, so a change simply
+  // remounts it with fresh state.
   const [expandedCampaigns, setExpandedCampaigns] = useState<Set<string>>(new Set());
   const [expandedAdSets, setExpandedAdSets] = useState<Set<string>>(new Set());
+  const [adSetsByCampaign, setAdSetsByCampaign] = useState<Record<string, LoadState<AdSet[]>>>({});
+  const [adsByAdSet, setAdsByAdSet] = useState<Record<string, LoadState<Ad[]>>>({});
+  const [detailAd, setDetailAd] = useState<Ad | null>(null);
 
-  const campaignName = useMemo(() => new Map(campaigns.map((c) => [c.id, c.name])), [campaigns]);
-  const adSetName = useMemo(() => new Map(adSets.map((s) => [s.id, s.name])), [adSets]);
+  function loadAdSets(campaignId: string) {
+    setAdSetsByCampaign((prev) => ({ ...prev, [campaignId]: { status: "loading" } }));
+    api.integrations
+      .adSetsForCampaign(campaignId, preset)
+      .then((r) => setAdSetsByCampaign((prev) => ({ ...prev, [campaignId]: { status: "ready", data: r.adSets } })))
+      .catch((err) => setAdSetsByCampaign((prev) => ({ ...prev, [campaignId]: { status: "error", message: errMsg(err, "Couldn't load ad sets.") } })));
+  }
 
-  const adSetsByCampaign = useMemo(() => {
-    const map = new Map<string, AdSet[]>();
-    for (const s of adSets) map.set(s.campaignId, [...(map.get(s.campaignId) ?? []), s]);
-    return map;
-  }, [adSets]);
-
-  const adsByAdSet = useMemo(() => {
-    const map = new Map<string, Ad[]>();
-    for (const a of ads) map.set(a.adsetId, [...(map.get(a.adsetId) ?? []), a]);
-    return map;
-  }, [ads]);
-
-  const counts = useMemo(() => {
-    const byType = { IMAGE: 0, VIDEO: 0, CAROUSEL: 0, UNKNOWN: 0 } as Record<AdMediaType, number>;
-    for (const ad of ads) byType[ad.creative?.mediaType ?? "UNKNOWN"]++;
-    return { adSets: adSets.length, ads: ads.length, ...byType };
-  }, [ads, adSets]);
-
-  function toggleCampaign(id: string) {
+  function toggleCampaign(campaign: AdCampaign) {
+    const id = campaign.id;
+    const wasExpanded = expandedCampaigns.has(id);
     setExpandedCampaigns((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
+    if (wasExpanded) return;
+    const current = adSetsByCampaign[id];
+    if (current && current.status !== "error") return;
+    loadAdSets(id);
   }
-  function toggleAdSet(id: string) {
+
+  function loadAds(adsetId: string) {
+    setAdsByAdSet((prev) => ({ ...prev, [adsetId]: { status: "loading" } }));
+    api.integrations
+      .adsForAdSet(adsetId, preset)
+      .then((r) => setAdsByAdSet((prev) => ({ ...prev, [adsetId]: { status: "ready", data: r.ads } })))
+      .catch((err) => setAdsByAdSet((prev) => ({ ...prev, [adsetId]: { status: "error", message: errMsg(err, "Couldn't load ad copies.") } })));
+  }
+
+  function toggleAdSet(adSet: AdSet) {
+    const id = adSet.id;
+    const wasExpanded = expandedAdSets.has(id);
     setExpandedAdSets((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
+    if (wasExpanded) return;
+    const current = adsByAdSet[id];
+    if (current && current.status !== "error") return;
+    loadAds(id);
   }
 
   type TreeRow =
-    | { kind: "campaign"; campaign: AdCampaign; adSetCount: number }
-    | { kind: "adset"; adSet: AdSet; adCount: number }
+    | { kind: "campaign"; campaign: AdCampaign }
+    | { kind: "adsets-loading" }
+    | { kind: "adsets-error"; campaignId: string; message: string }
+    | { kind: "adset"; adSet: AdSet }
+    | { kind: "ads-loading" }
+    | { kind: "ads-error"; adsetId: string; message: string }
     | { kind: "ad"; ad: Ad };
 
   const rows = useMemo(() => {
     const out: TreeRow[] = [];
     for (const c of campaigns) {
-      const cAdSets = adSetsByCampaign.get(c.id) ?? [];
-      out.push({ kind: "campaign", campaign: c, adSetCount: cAdSets.length });
+      out.push({ kind: "campaign", campaign: c });
       if (!expandedCampaigns.has(c.id)) continue;
-      for (const s of cAdSets) {
-        const sAds = adsByAdSet.get(s.id) ?? [];
-        out.push({ kind: "adset", adSet: s, adCount: sAds.length });
-        if (!expandedAdSets.has(s.id)) continue;
-        for (const a of sAds) out.push({ kind: "ad", ad: a });
+
+      const s = adSetsByCampaign[c.id];
+      if (!s || s.status === "loading") {
+        out.push({ kind: "adsets-loading" });
+        continue;
+      }
+      if (s.status === "error") {
+        out.push({ kind: "adsets-error", campaignId: c.id, message: s.message });
+        continue;
+      }
+      for (const adSet of s.data) {
+        out.push({ kind: "adset", adSet });
+        if (!expandedAdSets.has(adSet.id)) continue;
+
+        const a = adsByAdSet[adSet.id];
+        if (!a || a.status === "loading") {
+          out.push({ kind: "ads-loading" });
+          continue;
+        }
+        if (a.status === "error") {
+          out.push({ kind: "ads-error", adsetId: adSet.id, message: a.message });
+          continue;
+        }
+        for (const ad of a.data) out.push({ kind: "ad", ad });
       }
     }
     return out;
-  }, [campaigns, adSetsByCampaign, adsByAdSet, expandedCampaigns, expandedAdSets]);
-
-  const filteredAds = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return ads.filter((ad) => {
-      if (mediaFilter !== "ALL" && (ad.creative?.mediaType ?? "UNKNOWN") !== mediaFilter) return false;
-      if (!q) return true;
-      const haystack = `${ad.name} ${ad.creative?.title ?? ""} ${ad.creative?.bodyText ?? ""}`.toLowerCase();
-      return haystack.includes(q);
-    });
-  }, [ads, query, mediaFilter]);
+  }, [campaigns, expandedCampaigns, expandedAdSets, adSetsByCampaign, adsByAdSet]);
 
   return (
     <div className="space-y-6">
-      {/* Audit summary — every ad set and every ad copy, at a glance */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <MetricCard label="Ad sets" value={counts.adSets} loading={loading} help="How many ad sets are running in this account." />
-        <MetricCard label="Ad copies" value={counts.ads} loading={loading} help="Every individual ad — one row per creative." />
-        <MetricCard label="Images" value={counts.IMAGE} loading={loading} help="Ad copies running a single static image." />
-        <MetricCard label="Videos / Reels" value={counts.VIDEO} loading={loading} help="Ad copies running a video or Reel." />
-        <MetricCard label="Carousels" value={counts.CAROUSEL} loading={loading} help="Ad copies running a multi-card carousel." />
-      </div>
-
       {/* Campaigns → ad sets → ad copies */}
       <Card className="overflow-hidden">
         <div className="border-b border-border px-5 py-4">
@@ -164,19 +193,22 @@ export function AdAudit({
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => {
+                {rows.map((row, i) => {
                   if (row.kind === "campaign") {
                     const c = row.campaign;
                     const open = expandedCampaigns.has(c.id);
+                    const state = adSetsByCampaign[c.id];
                     return (
                       <tr key={`c-${c.id}`} className="border-b border-border/60 bg-muted/20 hover:bg-muted/30">
                         <td className="px-5 py-3">
-                          <button onClick={() => toggleCampaign(c.id)} className="flex w-full items-center gap-2 text-left">
+                          <button onClick={() => toggleCampaign(c)} className="flex w-full items-center gap-2 text-left">
                             <ChevronRight className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
                             <span className="max-w-[260px] truncate font-medium">{c.name}</span>
-                            <Badge variant="secondary" className="shrink-0 text-[10px]">
-                              {row.adSetCount} ad set{row.adSetCount === 1 ? "" : "s"}
-                            </Badge>
+                            {state?.status === "ready" && (
+                              <Badge variant="secondary" className="shrink-0 text-[10px]">
+                                {state.data.length} ad set{state.data.length === 1 ? "" : "s"}
+                              </Badge>
+                            )}
                           </button>
                         </td>
                         <td className="px-5 py-3">
@@ -191,19 +223,44 @@ export function AdAudit({
                     );
                   }
 
+                  if (row.kind === "adsets-loading") {
+                    return (
+                      <tr key={`asl-${i}`} className="border-b border-border/60">
+                        <td colSpan={7} className="py-3 pl-9 pr-5 text-xs text-muted-foreground">
+                          <span className="inline-flex items-center gap-2">
+                            <Loader2 className="size-3.5 animate-spin" /> Loading ad sets…
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  }
+
+                  if (row.kind === "adsets-error") {
+                    return (
+                      <tr key={`ase-${row.campaignId}`} className="border-b border-border/60">
+                        <td colSpan={7} className="py-3 pl-9 pr-5">
+                          <RetryRow message={row.message} onRetry={() => loadAdSets(row.campaignId)} />
+                        </td>
+                      </tr>
+                    );
+                  }
+
                   if (row.kind === "adset") {
                     const s = row.adSet;
                     const open = expandedAdSets.has(s.id);
+                    const state = adsByAdSet[s.id];
                     return (
                       <tr key={`s-${s.id}`} className="border-b border-border/60 hover:bg-muted/20">
                         <td className="py-2.5 pl-9 pr-5">
-                          <button onClick={() => toggleAdSet(s.id)} className="flex w-full items-center gap-2 text-left">
+                          <button onClick={() => toggleAdSet(s)} className="flex w-full items-center gap-2 text-left">
                             <ChevronRight className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
                             <Layers className="size-3.5 shrink-0 text-muted-foreground" />
                             <span className="max-w-[220px] truncate text-[13px]">{s.name}</span>
-                            <Badge variant="secondary" className="shrink-0 text-[10px]">
-                              {row.adCount} ad{row.adCount === 1 ? "" : "s"}
-                            </Badge>
+                            {state?.status === "ready" && (
+                              <Badge variant="secondary" className="shrink-0 text-[10px]">
+                                {state.data.length} ad{state.data.length === 1 ? "" : "s"}
+                              </Badge>
+                            )}
                           </button>
                         </td>
                         <td className="py-2.5 pr-5">
@@ -214,6 +271,28 @@ export function AdAudit({
                         <NumCell v={s.insights.conversions} />
                         <NumCell v={s.insights.purchaseValue} fmt={(v) => money(currency, v)} />
                         <NumCell v={s.insights.roas} fmt={roasFmt} />
+                      </tr>
+                    );
+                  }
+
+                  if (row.kind === "ads-loading") {
+                    return (
+                      <tr key={`adl-${i}`} className="border-b border-border/60">
+                        <td colSpan={7} className="py-3 pl-16 pr-5 text-xs text-muted-foreground">
+                          <span className="inline-flex items-center gap-2">
+                            <Loader2 className="size-3.5 animate-spin" /> Loading ad copies…
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  }
+
+                  if (row.kind === "ads-error") {
+                    return (
+                      <tr key={`ade-${row.adsetId}`} className="border-b border-border/60">
+                        <td colSpan={7} className="py-3 pl-16 pr-5">
+                          <RetryRow message={row.message} onRetry={() => loadAds(row.adsetId)} />
+                        </td>
                       </tr>
                     );
                   }
@@ -255,12 +334,118 @@ export function AdAudit({
         )}
       </Card>
 
-      {/* Ad copies — searchable across every campaign */}
+      <ActiveAdsSearch accountId={accountId} preset={preset} currency={currency} onSelect={setDetailAd} />
+
+      <AdDetailDialog
+        ad={detailAd}
+        currency={currency}
+        numericAccountId={numericAccountId}
+        onOpenChange={(v) => !v && setDetailAd(null)}
+      />
+    </div>
+  );
+}
+
+function RetryRow({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="flex items-center gap-2 text-xs text-danger">
+      <AlertTriangle className="size-3.5 shrink-0" />
+      <span className="text-muted-foreground">{message}</span>
+      <Button variant="ghost" size="sm" onClick={onRetry} className="h-6 px-2 text-xs">
+        <RefreshCw className="size-3" /> Retry
+      </Button>
+    </div>
+  );
+}
+
+/* --------------------------- searchable ad copies -------------------------- */
+
+/**
+ * Every ad with activity in the selected period, across the whole account —
+ * fetched separately from the tree above, and scoped by Meta to "had
+ * delivery in this period" rather than the account's full history.
+ */
+function ActiveAdsSearch({
+  accountId,
+  preset,
+  currency,
+  onSelect,
+}: {
+  accountId: string;
+  preset: AdDatePreset;
+  currency: string;
+  onSelect: (ad: Ad) => void;
+}) {
+  const [ads, setAds] = useState<Ad[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [mediaFilter, setMediaFilter] = useState<MediaFilter>("ALL");
+  const [reloadKey, setReloadKey] = useState(0);
+
+  /** Derived rather than cleared up front — clearing state synchronously in an effect body is what triggers React's cascading-render warning. */
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
+  const requestKey = accountId ? `${accountId}:${preset}:${reloadKey}` : null;
+  const stale = requestKey !== null && loadedFor !== requestKey;
+
+  useEffect(() => {
+    if (!accountId || !requestKey) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const r = await api.integrations.activeAds(accountId, preset);
+        if (cancelled) return;
+        setAds(r.ads);
+        setError(null);
+      } catch (err) {
+        if (cancelled) return;
+        setError(errMsg(err, "Couldn't load ad copies."));
+        setAds([]);
+      } finally {
+        if (!cancelled) setLoadedFor(requestKey);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [accountId, preset, requestKey]);
+
+  const counts = useMemo(() => {
+    const byType = { IMAGE: 0, VIDEO: 0, CAROUSEL: 0, UNKNOWN: 0 } as Record<AdMediaType, number>;
+    const adSetIds = new Set<string>();
+    for (const ad of ads ?? []) {
+      byType[ad.creative?.mediaType ?? "UNKNOWN"]++;
+      if (ad.adsetId) adSetIds.add(ad.adsetId);
+    }
+    return { adSets: adSetIds.size, ads: ads?.length ?? 0, ...byType };
+  }, [ads]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return (ads ?? []).filter((ad) => {
+      if (mediaFilter !== "ALL" && (ad.creative?.mediaType ?? "UNKNOWN") !== mediaFilter) return false;
+      if (!q) return true;
+      const haystack = `${ad.name} ${ad.creative?.title ?? ""} ${ad.creative?.bodyText ?? ""}`.toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [ads, query, mediaFilter]);
+
+  const loading = stale || ads === null;
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+        <MetricCard label="Ad sets with activity" value={counts.adSets} loading={loading} help="Ad sets that had spend or delivery in this period." />
+        <MetricCard label="Ad copies" value={counts.ads} loading={loading} help="Individual ads with activity in this period." />
+        <MetricCard label="Images" value={counts.IMAGE} loading={loading} help="Ad copies running a single static image." />
+        <MetricCard label="Videos / Reels" value={counts.VIDEO} loading={loading} help="Ad copies running a video or Reel." />
+        <MetricCard label="Carousels" value={counts.CAROUSEL} loading={loading} help="Ad copies running a multi-card carousel." />
+      </div>
+
       <Card className="overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
           <div>
             <h3 className="text-sm font-semibold">Every ad copy</h3>
-            <p className="mt-0.5 text-xs text-muted-foreground">Search or filter across all campaigns at once.</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">Search or filter across every campaign for this period.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <div className="relative">
@@ -286,19 +471,31 @@ export function AdAudit({
 
         {loading ? (
           <div className="h-40 animate-pulse bg-muted/40" />
-        ) : filteredAds.length === 0 ? (
+        ) : error ? (
+          <EmptyState
+            icon={AlertTriangle}
+            title="Couldn't load ad copies"
+            description={error}
+            className="border-0 bg-transparent py-10"
+            action={
+              <Button size="sm" onClick={() => setReloadKey((k) => k + 1)}>
+                <RefreshCw className="size-4" /> Retry
+              </Button>
+            }
+          />
+        ) : filtered.length === 0 ? (
           <EmptyState
             icon={Megaphone}
-            title={ads.length === 0 ? "No ads" : "No ad copies match"}
-            description={ads.length === 0 ? "This account has no ads yet." : "Try a different search or media filter."}
+            title={(ads ?? []).length === 0 ? "No ads had activity in this period" : "No ad copies match"}
+            description={(ads ?? []).length === 0 ? "Try a wider date range." : "Try a different search or media filter."}
             className="border-0 bg-transparent py-10"
           />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[960px] text-sm">
+            <table className="w-full min-w-[880px] text-sm">
               <thead>
                 <tr className="border-b border-border text-left">
-                  {["Creative", "Ad copy", "Campaign › Ad set", "Status", "Spend", "Clicks", "Purchases", "Purchase value", "ROAS"].map((h) => (
+                  {["Creative", "Ad copy", "Status", "Spend", "Clicks", "Purchases", "Purchase value", "ROAS"].map((h) => (
                     <th key={h} className="px-5 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                       {h}
                     </th>
@@ -306,23 +503,16 @@ export function AdAudit({
                 </tr>
               </thead>
               <tbody>
-                {filteredAds.map((ad) => (
-                  <tr
-                    key={ad.id}
-                    onClick={() => setDetailAd(ad)}
-                    className="cursor-pointer border-b border-border/60 last:border-0 hover:bg-muted/30"
-                  >
+                {filtered.map((ad) => (
+                  <tr key={ad.id} onClick={() => onSelect(ad)} className="cursor-pointer border-b border-border/60 last:border-0 hover:bg-muted/30">
                     <td className="px-5 py-3">
                       <CreativeHoverPreview creative={ad.creative}>
                         <CreativeThumb creative={ad.creative} />
                       </CreativeHoverPreview>
                     </td>
-                    <td className="max-w-[280px] px-5 py-3">
+                    <td className="max-w-[320px] px-5 py-3">
                       <p className="truncate font-medium">{ad.creative?.title || ad.name}</p>
                       <p className="line-clamp-1 text-xs text-muted-foreground">{ad.creative?.bodyText || "No ad copy text"}</p>
-                    </td>
-                    <td className="max-w-[220px] truncate px-5 py-3 text-xs text-muted-foreground">
-                      {campaignName.get(ad.campaignId) ?? "—"} › {adSetName.get(ad.adsetId) ?? "—"}
                     </td>
                     <td className="px-5 py-3">
                       <StatusDot state={ad.status === "ACTIVE" ? "connected" : "disconnected"} label={ad.status.toLowerCase()} />
@@ -339,15 +529,6 @@ export function AdAudit({
           </div>
         )}
       </Card>
-
-      <AdDetailDialog
-        ad={detailAd}
-        campaignLabel={detailAd ? campaignName.get(detailAd.campaignId) ?? null : null}
-        adSetLabel={detailAd ? adSetName.get(detailAd.adsetId) ?? null : null}
-        currency={currency}
-        numericAccountId={numericAccountId}
-        onOpenChange={(v) => !v && setDetailAd(null)}
-      />
     </div>
   );
 }
@@ -470,15 +651,11 @@ function NumCell({ v, fmt }: { v: number | null; fmt?: (n: number | null) => str
 
 function AdDetailDialog({
   ad,
-  campaignLabel,
-  adSetLabel,
   currency,
   numericAccountId,
   onOpenChange,
 }: {
   ad: Ad | null;
-  campaignLabel: string | null;
-  adSetLabel: string | null;
   currency: string;
   numericAccountId: string;
   onOpenChange: (open: boolean) => void;
@@ -519,10 +696,9 @@ function AdDetailDialog({
               </DialogDescription>
             </div>
 
-            <p className="text-xs text-muted-foreground">
-              {campaignLabel ?? "—"} › {adSetLabel ?? "—"}
-              {ad?.creative?.callToAction && ` · CTA: ${ad.creative.callToAction.replaceAll("_", " ").toLowerCase()}`}
-            </p>
+            {ad?.creative?.callToAction && (
+              <p className="text-xs text-muted-foreground">CTA: {ad.creative.callToAction.replaceAll("_", " ").toLowerCase()}</p>
+            )}
 
             <div className="grid grid-cols-3 gap-3 rounded-lg border border-border bg-muted/30 p-3">
               {metrics.map((m) => (
