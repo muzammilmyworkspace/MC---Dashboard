@@ -1,9 +1,18 @@
 import "server-only";
 /* ------------------------------------------------------------------ *
- *  Meta OAuth — Facebook Login for Business
+ *  Meta OAuth — Instagram API with Instagram Login
  *
- *  SERVER ONLY. Reads META_APP_SECRET; nothing here returns, logs or
+ *  SERVER ONLY. Reads META_IG_APP_SECRET; nothing here returns, logs or
  *  serialises it, the authorization code, or any access token.
+ *
+ *  Originally built against Facebook Login for Business (a Page-linked
+ *  Instagram Business account, via a Page Access Token). That flow needed
+ *  `pages_messaging` to subscribe a Page to message webhooks — a
+ *  permission this app was never granted, because its actual configured
+ *  product is "Instagram API with Instagram Login": direct login, no
+ *  Facebook Page involved, a different app id/secret pair
+ *  (META_IG_APP_ID/META_IG_APP_SECRET), and Graph calls against
+ *  graph.instagram.com instead of graph.facebook.com.
  *
  *  This is an *additional* connection path. The System User token flow in
  *  services/instagram/ is untouched and keeps working independently — the
@@ -18,7 +27,7 @@ import { decryptJson, encryptJson } from "../crypto";
 import {
   MetaNotConfiguredError,
   metaConfigStatus,
-  metaOAuthConfig,
+  metaIgLoginConfig,
 } from "./config";
 
 export const META_INTEGRATION_KEY = "meta-graph";
@@ -78,31 +87,27 @@ export function verifyOAuthState(state: string | undefined): { userId: string } 
 
 /* ------------------------------ Step 1: URL ------------------------------ */
 
-/**
- * Builds the authorization URL.
- *
- * Note there is no `scope` parameter. With Facebook Login for Business the
- * permission set lives on the configuration (`config_id`) in the Meta
- * dashboard, and a `scope` passed alongside it is ignored. To change what
- * MC Nexus asks for, edit the "MC Nexus Instagram" configuration at Meta —
- * not this file.
- */
+/** Everything the app can do with the resulting token — matches what's added under "Add required messaging permissions". */
+const IG_LOGIN_SCOPES = "instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments";
+
 export function buildAuthorizeUrl(state: string): string {
-  const cfg = metaOAuthConfig();
+  const cfg = metaIgLoginConfig();
   const params = new URLSearchParams({
-    client_id: cfg.appId,
-    config_id: cfg.configId,
+    client_id: cfg.igAppId,
     redirect_uri: cfg.redirectUri,
     response_type: "code",
+    scope: IG_LOGIN_SCOPES,
     state,
   });
-  return `https://www.facebook.com/${cfg.apiVersion}/dialog/oauth?${params.toString()}`;
+  return `https://www.instagram.com/oauth/authorize?${params.toString()}`;
 }
 
 /* --------------------------- Meta HTTP plumbing -------------------------- */
 
 interface MetaErrorBody {
   error?: { message?: string; type?: string; code?: number; error_subcode?: number };
+  error_message?: string;
+  error_type?: string;
 }
 
 /**
@@ -127,7 +132,11 @@ async function metaFetch<T>(url: string, init?: RequestInit): Promise<T> {
   }
 
   if (!res.ok) {
-    const err = (body as MetaErrorBody)?.error;
+    // Instagram's own OAuth endpoints (api.instagram.com) shape errors as
+    // { error_type, error_message } instead of Graph's { error: { message } }.
+    const graphErr = (body as MetaErrorBody)?.error;
+    const flat = body as MetaErrorBody;
+    const err = graphErr ?? (flat?.error_message ? { message: flat.error_message, type: flat.error_type } : undefined);
     // Safe to log: Meta's own error description, not a credential — the URL (which does
     // carry the app secret for the token exchange) is deliberately never passed here.
     console.error(`[meta-oauth] ${res.status}: ${JSON.stringify(err ?? {})}`);
@@ -148,10 +157,7 @@ function humanMetaError(err: MetaErrorBody["error"], status: number): string {
   const raw = err?.message ?? "";
 
   if (/redirect_uri/i.test(raw)) {
-    return "The redirect URI doesn't match the one registered on the Meta app. They must be identical, including http/https and any trailing slash.";
-  }
-  if (/config_id|configuration/i.test(raw)) {
-    return "Meta rejected the login configuration ID. Check META_INSTAGRAM_CONFIG_ID matches a live configuration on the app.";
+    return "The redirect URI doesn't match the one registered under Instagram business login. They must be identical, including http/https and any trailing slash.";
   }
   if (/code.*expired|expired.*code/i.test(raw) || err?.error_subcode === 36007) {
     return "That authorization code has expired. Codes are valid for a few minutes and can only be used once — please press Connect again.";
@@ -159,120 +165,86 @@ function humanMetaError(err: MetaErrorBody["error"], status: number): string {
   if (/already been used/i.test(raw)) {
     return "That authorization code was already used. Please press Connect again.";
   }
+  if (/client secret|validating client secret/i.test(raw)) {
+    return "Meta rejected the credentials. Verify META_IG_APP_SECRET matches the Instagram app secret shown under API setup with Instagram login.";
+  }
   if (err?.code === 190) {
-    return "Meta rejected the credentials. Verify META_APP_ID and META_APP_SECRET in server/.env.";
+    return "Meta rejected the credentials. Verify META_IG_APP_ID and META_IG_APP_SECRET.";
   }
   if (status === 400) {
-    return "Meta rejected the request. Check the app ID, secret and redirect URI in server/.env.";
+    return "Meta rejected the request. Check META_IG_APP_ID, META_IG_APP_SECRET and the redirect URI.";
   }
   return "Meta returned an unexpected error. Please try again.";
 }
 
 /* --------------------------- Step 2: token swap -------------------------- */
 
-interface TokenResponse {
+interface ShortLivedToken {
   access_token: string;
-  token_type?: string;
-  expires_in?: number;
+  user_id: string;
+  permissions?: string;
 }
 
 /**
- * Swaps the authorization code for a user access token.
+ * Swaps the authorization code for a short-lived Instagram User Access
+ * Token, scoped directly to the connected Instagram account — there is no
+ * Facebook Page in this flow, so no Page-discovery step afterward.
  *
  * POST with a form body rather than GET: it keeps the app secret and the code
  * out of the request line, where they would otherwise land in any proxy or
  * access log between here and Meta.
  */
-async function exchangeAuthorizationCode(code: string): Promise<TokenResponse> {
-  const cfg = metaOAuthConfig();
+async function exchangeAuthorizationCode(code: string): Promise<ShortLivedToken> {
+  const cfg = metaIgLoginConfig();
   const body = new URLSearchParams({
-    client_id: cfg.appId,
-    client_secret: cfg.appSecret,
+    client_id: cfg.igAppId,
+    client_secret: cfg.igAppSecret,
+    grant_type: "authorization_code",
     redirect_uri: cfg.redirectUri,
     code,
   });
 
-  return metaFetch<TokenResponse>(`https://graph.facebook.com/${cfg.apiVersion}/oauth/access_token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: body.toString(),
-  });
+  const res = await metaFetch<{ data?: ShortLivedToken[] } | ShortLivedToken>(
+    "https://api.instagram.com/oauth/access_token",
+    { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: body.toString() }
+  );
+
+  // Documented as { data: [...] } for this product, but tolerate a flat object too.
+  if ("data" in res && Array.isArray(res.data) && res.data[0]) return res.data[0];
+  return res as ShortLivedToken;
+}
+
+interface LongLivedToken {
+  access_token: string;
+  token_type: string;
+  expires_in: number;
 }
 
 /** Upgrades a short-lived token to the ~60 day long-lived one. */
-async function exchangeForLongLivedToken(shortLived: string): Promise<TokenResponse> {
-  const cfg = metaOAuthConfig();
-  const body = new URLSearchParams({
-    grant_type: "fb_exchange_token",
-    client_id: cfg.appId,
-    client_secret: cfg.appSecret,
-    fb_exchange_token: shortLived,
+async function exchangeForLongLivedToken(shortLived: string): Promise<LongLivedToken> {
+  const cfg = metaIgLoginConfig();
+  const params = new URLSearchParams({
+    grant_type: "ig_exchange_token",
+    client_secret: cfg.igAppSecret,
+    access_token: shortLived,
   });
 
-  return metaFetch<TokenResponse>(`https://graph.facebook.com/${cfg.apiVersion}/oauth/access_token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: body.toString(),
-  });
+  return metaFetch<LongLivedToken>(`https://graph.instagram.com/access_token?${params.toString()}`);
 }
 
 /* ----------------------- Step 3: identify the account -------------------- */
 
-export interface DiscoveredAccount {
-  pageId: string;
-  pageName: string;
-  /** Page tokens derived from a long-lived user token do not expire. */
-  pageAccessToken: string;
-  igAccountId: string;
-  igUsername: string;
-}
-
-async function discoverInstagramAccount(userToken: string): Promise<DiscoveredAccount> {
-  const cfg = metaOAuthConfig();
-  const url =
-    `https://graph.facebook.com/${cfg.apiVersion}/me/accounts` +
-    `?fields=id,name,access_token,instagram_business_account{id,username}`;
-
-  const res = await metaFetch<{
-    data?: {
-      id: string;
-      name: string;
-      access_token: string;
-      instagram_business_account?: { id: string; username: string };
-    }[];
-  }>(url, { headers: { Authorization: `Bearer ${userToken}` } });
-
-  const pages = res.data ?? [];
-  if (pages.length === 0) {
-    throw new MetaOAuthError(
-      "no_pages",
-      "That Meta account doesn't manage any Facebook Pages, so there's no Instagram account to connect."
-    );
-  }
-
-  const linked = pages.find((p) => p.instagram_business_account?.id);
-  if (!linked?.instagram_business_account) {
-    throw new MetaOAuthError(
-      "no_instagram",
-      `Found ${pages.length} Page(s) but none has an Instagram professional account linked. Link it in Meta Business Settings, then try again.`
-    );
-  }
-
-  return {
-    pageId: linked.id,
-    pageName: linked.name,
-    pageAccessToken: linked.access_token,
-    igAccountId: linked.instagram_business_account.id,
-    igUsername: linked.instagram_business_account.username,
-  };
+async function fetchIgUsername(token: string): Promise<string> {
+  const url = `https://graph.instagram.com/${env.META_GRAPH_VERSION}/me?fields=username`;
+  const res = await metaFetch<{ username?: string }>(url, { headers: { Authorization: `Bearer ${token}` } });
+  return res.username ?? "";
 }
 
 /* ----------------------------- Storage ----------------------------------- */
 
 /** Encrypted at rest inside Integration.credentials. Never leaves the server. */
 interface StoredCredentials {
-  userAccessToken: string;
-  pageAccessToken: string;
+  igAccessToken: string;
   tokenType: string;
   expiresAt: string | null;
 }
@@ -281,8 +253,6 @@ interface StoredCredentials {
 export interface MetaConnectionMetadata {
   igAccountId: string;
   igUsername: string;
-  pageId: string;
-  pageName: string;
   connectedAt: string;
   connectedByUserId: string;
   tokenExpiresAt: string | null;
@@ -296,26 +266,25 @@ export async function completeOAuth(code: string, userId: string): Promise<MetaC
   const shortLived = await exchangeAuthorizationCode(code);
   // Best effort: if the long-lived swap fails we still have a working token,
   // just a shorter-lived one. Losing the connection over it would be worse.
-  const longLived = await exchangeForLongLivedToken(shortLived.access_token).catch(() => shortLived);
+  const longLived = await exchangeForLongLivedToken(shortLived.access_token).catch(
+    (): LongLivedToken => ({ access_token: shortLived.access_token, token_type: "bearer", expires_in: 0 })
+  );
 
-  const account = await discoverInstagramAccount(longLived.access_token);
+  const igUsername = await fetchIgUsername(longLived.access_token);
 
   const expiresAt = longLived.expires_in
     ? new Date(Date.now() + longLived.expires_in * 1000).toISOString()
     : null;
 
   const credentials: StoredCredentials = {
-    userAccessToken: longLived.access_token,
-    pageAccessToken: account.pageAccessToken,
+    igAccessToken: longLived.access_token,
     tokenType: longLived.token_type ?? "bearer",
     expiresAt,
   };
 
   const metadata: MetaConnectionMetadata = {
-    igAccountId: account.igAccountId,
-    igUsername: account.igUsername,
-    pageId: account.pageId,
-    pageName: account.pageName,
+    igAccountId: shortLived.user_id,
+    igUsername,
     connectedAt: new Date().toISOString(),
     connectedByUserId: userId,
     tokenExpiresAt: expiresAt,
@@ -374,7 +343,7 @@ export async function metaConnectionStatus(): Promise<MetaConnectionStatus> {
   const config = metaConfigStatus();
 
   // Config validity is answerable without the database. Letting a Postgres
-  // outage throw here would mask a wrong META_APP_ID behind a generic
+  // outage throw here would mask a wrong META_IG_APP_ID behind a generic
   // "can't reach the API", which is the harder problem to diagnose.
   const row = await prisma.integration
     .findUnique({ where: { key: META_INTEGRATION_KEY } })

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { verifyGithubSignature, safeEqual } from "@/server/crypto";
 import { env } from "@/server/env";
 import { metaWebhookVerifyToken } from "@/server/meta/config";
-import { requireConnectedPage, recordInboundMessage, type InboundEvent } from "@/server/meta/messaging";
+import { requireConnectedAccount, recordInboundMessage, type InboundEvent } from "@/server/meta/messaging";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -55,8 +55,13 @@ export async function POST(req: Request) {
   const rawBody = await req.text();
   const signature = req.headers.get("x-hub-signature-256") ?? undefined;
 
-  if (!env.META_APP_SECRET) return new NextResponse(null, { status: 503 });
-  if (!verifyGithubSignature(rawBody, signature, env.META_APP_SECRET)) {
+  // "API setup with Instagram login" is a separate product from the classic
+  // Facebook app config — which secret Meta signs this payload with isn't
+  // documented for certain, so both are accepted rather than risking every
+  // real webhook silently failing signature verification.
+  const secrets = [env.META_IG_APP_SECRET, env.META_APP_SECRET].filter((s): s is string => Boolean(s));
+  if (secrets.length === 0) return new NextResponse(null, { status: 503 });
+  if (!secrets.some((secret) => verifyGithubSignature(rawBody, signature, secret))) {
     // Unsigned or forged. Never parse the body of an unverified request.
     return new NextResponse(null, { status: 401 });
   }
@@ -81,7 +86,7 @@ async function processPayload(rawBody: string): Promise<void> {
   const messagingEntries = (payload.entry ?? []).filter((e) => e.messaging?.length);
   if (messagingEntries.length === 0) return;
 
-  const auth = await requireConnectedPage().catch(() => null);
+  const auth = await requireConnectedAccount().catch(() => null);
   if (!auth) {
     console.warn("[meta-webhook] messages arrived but no Instagram connection is stored");
     return;

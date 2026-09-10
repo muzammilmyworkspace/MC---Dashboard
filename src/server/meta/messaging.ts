@@ -9,13 +9,13 @@ import { metaConnectionStatus, readMetaCredentials } from "./oauth";
 /* ------------------------------------------------------------------ *
  *  Instagram Direct Messages
  *
- *  Uses the OAuth-connected Page Access Token — the System User token
- *  (`META_ACCESS_TOKEN`, used by ads.ts/pages.ts/instagram/client.ts) was
- *  never granted `instagram_manage_messages`; the Facebook-Login-for-
- *  Business connection was. This is that token's first real consumer.
+ *  Runs on "Instagram API with Instagram Login" — a direct Instagram User
+ *  Access Token (no Facebook Page involved), against graph.instagram.com.
+ *  The System User token (`META_ACCESS_TOKEN`, used by ads.ts/pages.ts/
+ *  instagram/client.ts) is untouched and was never part of this path.
  * ------------------------------------------------------------------ */
 
-const GRAPH = "https://graph.facebook.com";
+const GRAPH = "https://graph.instagram.com";
 
 export class MessagingUnavailableError extends Error {
   readonly code: string;
@@ -26,21 +26,21 @@ export class MessagingUnavailableError extends Error {
   }
 }
 
-interface PageAuth {
-  pageId: string;
-  pageAccessToken: string;
+interface IgAuth {
+  igUserId: string;
+  igAccessToken: string;
 }
 
 /** Everything a Send API call needs, or a clear reason there isn't one. */
-export async function requireConnectedPage(): Promise<PageAuth> {
+export async function requireConnectedAccount(): Promise<IgAuth> {
   const [status, credentials] = await Promise.all([metaConnectionStatus(), readMetaCredentials()]);
   if (!status.connected || !status.account) {
     throw new MessagingUnavailableError("not_connected", "Instagram isn't connected. Connect it from the Integrations page first.");
   }
-  if (!credentials?.pageAccessToken) {
-    throw new MessagingUnavailableError("no_token", "The Instagram connection is missing its Page access token — reconnect it.");
+  if (!credentials?.igAccessToken) {
+    throw new MessagingUnavailableError("no_token", "The Instagram connection is missing its access token — reconnect it.");
   }
-  return { pageId: status.account.pageId, pageAccessToken: credentials.pageAccessToken };
+  return { igUserId: status.account.igAccountId, igAccessToken: credentials.igAccessToken };
 }
 
 async function graphGet<T>(path: string, params: Record<string, string>, token: string): Promise<T> {
@@ -50,38 +50,6 @@ async function graphGet<T>(path: string, params: Record<string, string>, token: 
 
 async function graphPost<T>(path: string, body: unknown, token: string): Promise<T> {
   return providerRequest<T>({ provider: "meta-messaging", url: `${GRAPH}/${env.META_GRAPH_VERSION}/${path}`, token, method: "POST", body });
-}
-
-/**
- * Configuring the webhook URL under the app's Instagram product only says
- * *where* events go — the connected Page still has to be individually
- * subscribed to this app before it actually forwards anything, via
- * `POST /{page-id}/subscribed_apps`. The OAuth flow never did this, so
- * every account connected before this file existed silently sends nothing.
- *
- * Checked at most once per `RECHECK_MS` (module-scoped, so it survives for
- * a warm serverless instance) rather than on every list-conversations poll
- * — it's a no-op most of the time, but self-heals within one interval of
- * this deploying, with no manual step.
- */
-let lastSubscribeCheck = 0;
-const RECHECK_MS = 6 * 60 * 60 * 1000;
-
-export async function ensurePageSubscribed(): Promise<void> {
-  if (Date.now() - lastSubscribeCheck < RECHECK_MS) return;
-  lastSubscribeCheck = Date.now();
-
-  try {
-    const auth = await requireConnectedPage();
-    const url = `${GRAPH}/${env.META_GRAPH_VERSION}/${auth.pageId}/subscribed_apps?subscribed_fields=messages`;
-    const res = await fetch(url, { method: "POST", headers: { Authorization: `Bearer ${auth.pageAccessToken}` } });
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      console.error(`[ig-messaging] page subscribe failed (${res.status}): ${body.slice(0, 300)}`);
-    }
-  } catch (err) {
-    console.error(`[ig-messaging] page subscribe check failed: ${err instanceof Error ? err.message : err}`);
-  }
 }
 
 /* ----------------------------------- DTOs ---------------------------------- */
@@ -228,7 +196,7 @@ function inboundKind(msg: InboundMessage): { type: IgMsgType; text: string; medi
  * webhook) are skipped — `sendText`/`sendAudio` already recorded those
  * when they were sent.
  */
-export async function recordInboundMessage(event: InboundEvent, pageAuth: PageAuth): Promise<void> {
+export async function recordInboundMessage(event: InboundEvent, igAuth: IgAuth): Promise<void> {
   const senderId = event.sender?.id;
   const msg = event.message;
   if (!senderId || !msg || msg.is_echo) return;
@@ -239,7 +207,7 @@ export async function recordInboundMessage(event: InboundEvent, pageAuth: PageAu
 
   const existing = await prisma.igConversation.findUnique({ where: { id: senderId } });
   if (!existing) {
-    const profile = await lookupProfile(senderId, pageAuth.pageAccessToken);
+    const profile = await lookupProfile(senderId, igAuth.igAccessToken);
     await prisma.igConversation.create({
       data: {
         id: senderId,
@@ -279,14 +247,14 @@ interface SendResult {
 }
 
 export async function sendText(conversationId: string, text: string, userId: string | null): Promise<MetaMessageDto> {
-  const auth = await requireConnectedPage();
+  const auth = await requireConnectedAccount();
   const trimmed = text.trim();
   if (!trimmed) throw new MessagingUnavailableError("empty", "Message text is empty.");
 
   let status: IgMsgStatus = IgMsgStatus.SENT;
   let error: string | null = null;
   try {
-    await graphPost<SendResult>(`${auth.pageId}/messages`, { recipient: { id: conversationId }, message: { text: trimmed } }, auth.pageAccessToken);
+    await graphPost<SendResult>(`${auth.igUserId}/messages`, { recipient: { id: conversationId }, message: { text: trimmed } }, auth.igAccessToken);
   } catch (err) {
     status = IgMsgStatus.FAILED;
     error = err instanceof Error ? err.message : "Send failed.";
@@ -309,14 +277,14 @@ export async function sendText(conversationId: string, text: string, userId: str
 }
 
 /** Uploads once to Meta as a reusable attachment (so it can send without hosting the file ourselves), and separately keeps a playable copy in Vercel Blob for our own thread view. */
-async function uploadAudioAttachment(auth: PageAuth, buffer: Buffer, contentType: string): Promise<string> {
+async function uploadAudioAttachment(auth: IgAuth, buffer: Buffer, contentType: string): Promise<string> {
   const form = new FormData();
   form.set("message", JSON.stringify({ attachment: { type: "audio", payload: { is_reusable: true } } }));
   form.set("filedata", new Blob([new Uint8Array(buffer)], { type: contentType }), "voice-note.webm");
 
-  const res = await fetch(`${GRAPH}/${env.META_GRAPH_VERSION}/${auth.pageId}/message_attachments`, {
+  const res = await fetch(`${GRAPH}/${env.META_GRAPH_VERSION}/${auth.igUserId}/message_attachments`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${auth.pageAccessToken}` },
+    headers: { Authorization: `Bearer ${auth.igAccessToken}` },
     body: form,
   });
   if (!res.ok) {
@@ -329,7 +297,7 @@ async function uploadAudioAttachment(auth: PageAuth, buffer: Buffer, contentType
 }
 
 export async function sendAudio(conversationId: string, buffer: Buffer, contentType: string, userId: string | null): Promise<MetaMessageDto> {
-  const auth = await requireConnectedPage();
+  const auth = await requireConnectedAccount();
 
   let status: IgMsgStatus = IgMsgStatus.SENT;
   let error: string | null = null;
@@ -337,9 +305,9 @@ export async function sendAudio(conversationId: string, buffer: Buffer, contentT
   try {
     const attachmentId = await uploadAudioAttachment(auth, buffer, contentType);
     await graphPost<SendResult>(
-      `${auth.pageId}/messages`,
+      `${auth.igUserId}/messages`,
       { recipient: { id: conversationId }, message: { attachment: { type: "audio", payload: { attachment_id: attachmentId } } } },
-      auth.pageAccessToken
+      auth.igAccessToken
     );
   } catch (err) {
     status = IgMsgStatus.FAILED;

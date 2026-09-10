@@ -36,6 +36,14 @@ const schema = z.object({
   META_INSTAGRAM_CONFIG_ID: z.string().optional(),
   META_REDIRECT_URI: z.string().optional(),
   META_WEBHOOK_VERIFY_TOKEN: z.string().optional(),
+  /**
+   * "Instagram API with Instagram Login" credentials — a separate app
+   * identity from META_APP_ID/META_APP_SECRET (the Facebook app). DM
+   * sending/receiving runs on this pair; the classic OAuth connection
+   * (followers, media, insights) is untouched.
+   */
+  META_IG_APP_ID: z.string().optional(),
+  META_IG_APP_SECRET: z.string().optional(),
   META_GRAPH_VERSION: z.string().default("v23.0"),
   IG_MEDIA_LIMIT: z.coerce.number().default(50),
 

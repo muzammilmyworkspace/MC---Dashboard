@@ -18,11 +18,17 @@ import { env } from "../env";
 /** The exact copy the UI shows when credentials are absent. */
 export const META_NOT_CONFIGURED = "Instagram integration is not configured.";
 
-/** Values needed before the OAuth flow can run at all. */
+/**
+ * Values needed before the OAuth flow can run at all.
+ *
+ * "Instagram API with Instagram Login" credentials — this app's messaging
+ * permissions live here, not on the classic Facebook Login for Business
+ * config (META_APP_ID/META_INSTAGRAM_CONFIG_ID), which turned out to need a
+ * different permission (pages_messaging) this app was never granted.
+ */
 const REQUIRED_FOR_OAUTH = [
-  "META_APP_ID",
-  "META_APP_SECRET",
-  "META_INSTAGRAM_CONFIG_ID",
+  "META_IG_APP_ID",
+  "META_IG_APP_SECRET",
   "META_REDIRECT_URI",
 ] as const;
 
@@ -84,13 +90,12 @@ function validate(key: MetaEnvKey, value: string): string | null {
   if (looksLikePlaceholder(value)) return "still set to a placeholder value";
 
   switch (key) {
-    case "META_APP_ID":
-    case "META_INSTAGRAM_CONFIG_ID":
+    case "META_IG_APP_ID":
       // Meta ids are numeric strings; they exceed Number.MAX_SAFE_INTEGER so
       // they must stay strings — never parse these into numbers.
       return /^\d{8,}$/.test(value) ? null : "should be a numeric Meta id";
 
-    case "META_APP_SECRET":
+    case "META_IG_APP_SECRET":
       return value.length >= 32 ? null : "shorter than a valid Meta app secret";
 
     case "META_REDIRECT_URI":
@@ -143,7 +148,7 @@ export function metaConfigStatus(): MetaConfigStatus {
       .map((p) => `${p.key} ${p.reason}`)
       .join("; ")}`;
   } else if (oauth.missing.length) {
-    message = `${META_NOT_CONFIGURED} Set ${oauth.missing.join(", ")} in server/.env`;
+    message = `${META_NOT_CONFIGURED} Set ${oauth.missing.join(", ")} as environment variables.`;
   }
 
   return {
@@ -159,28 +164,26 @@ export function isMetaConfigured(): boolean {
   return metaConfigStatus().configured;
 }
 
-export interface MetaOAuthConfig {
-  appId: string;
+export interface MetaIgLoginConfig {
+  igAppId: string;
   /** Never log, return over HTTP, or include in an error message. */
-  appSecret: string;
-  configId: string;
+  igAppSecret: string;
   redirectUri: string;
   apiVersion: string;
 }
 
 /**
- * The only accessor for Meta credentials. Throws rather than returning a
- * half-populated object, so a caller can never silently build a request with
- * an empty secret.
+ * The only accessor for Instagram Login credentials. Throws rather than
+ * returning a half-populated object, so a caller can never silently build a
+ * request with an empty secret.
  */
-export function metaOAuthConfig(): MetaOAuthConfig {
+export function metaIgLoginConfig(): MetaIgLoginConfig {
   const status = metaConfigStatus();
   if (!status.configured) throw new MetaNotConfiguredError(status);
 
   return {
-    appId: read("META_APP_ID"),
-    appSecret: read("META_APP_SECRET"),
-    configId: read("META_INSTAGRAM_CONFIG_ID"),
+    igAppId: read("META_IG_APP_ID"),
+    igAppSecret: read("META_IG_APP_SECRET"),
     redirectUri: read("META_REDIRECT_URI"),
     apiVersion: env.META_GRAPH_VERSION,
   };

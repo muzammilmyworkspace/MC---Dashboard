@@ -428,8 +428,6 @@ export interface MetaConnectionStatus {
   account: {
     igAccountId: string;
     igUsername: string;
-    pageId: string;
-    pageName: string;
     connectedAt: string;
     tokenExpiresAt: string | null;
   } | null;

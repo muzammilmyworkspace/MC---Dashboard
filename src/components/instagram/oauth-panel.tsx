@@ -318,9 +318,8 @@ export function InstagramOAuthPanel() {
           )}
         </div>
 
-        <dl className="mt-5 grid grid-cols-2 gap-x-6 gap-y-3 border-t border-border pt-4 sm:grid-cols-4">
+        <dl className="mt-5 grid grid-cols-2 gap-x-6 gap-y-3 border-t border-border pt-4 sm:grid-cols-3">
           <Detail label="Instagram account ID" value={account?.igAccountId ?? "—"} mono />
-          <Detail label="Facebook Page" value={account?.pageName ?? "—"} />
           <Detail
             label="Connected"
             value={account?.connectedAt ? new Date(account.connectedAt).toLocaleString() : "—"}
