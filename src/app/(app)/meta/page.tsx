@@ -5,13 +5,14 @@ import { motion } from "framer-motion";
 import { Megaphone, AlertTriangle, RefreshCw } from "lucide-react";
 import {
   api, ApiRequestError,
-  type AdAccount, type AdCampaign, type AdDatePreset, type AdInsights, type AdsAvailability,
+  type Ad, type AdAccount, type AdCampaign, type AdDatePreset, type AdInsights, type AdSet, type AdsAvailability,
 } from "@/lib/api";
 import { MetricCard } from "@/components/analytics/metric-card";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/ui/status-dot";
 import { EmptyState } from "@/components/ui/page-shell";
+import { AdAudit } from "@/components/meta/ad-audit";
 import { cn } from "@/lib/utils";
 
 /** Meta's ad API works in fixed presets, so the picker matches them exactly. */
@@ -28,6 +29,8 @@ export default function MetaAdsPage() {
   const [preset, setPreset] = useState<AdDatePreset>("last_30d");
   const [insights, setInsights] = useState<AdInsights | null>(null);
   const [campaigns, setCampaigns] = useState<AdCampaign[] | null>(null);
+  const [adSets, setAdSets] = useState<AdSet[] | null>(null);
+  const [ads, setAds] = useState<Ad[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
 
@@ -57,18 +60,24 @@ export default function MetaAdsPage() {
 
     void (async () => {
       try {
-        const [i, c] = await Promise.all([
+        const [i, c, s, a] = await Promise.all([
           api.integrations.adInsights(account.id, preset),
           api.integrations.adCampaigns(account.id, preset),
+          api.integrations.adSets(account.id, preset),
+          api.integrations.ads(account.id, preset),
         ]);
         if (cancelled) return;
         setInsights(i.insights);
         setCampaigns(c.campaigns);
+        setAdSets(s.adSets);
+        setAds(a.ads);
         setError(null);
       } catch (err) {
         if (cancelled) return;
         setError(err instanceof ApiRequestError ? err.message : "Couldn't load ad data.");
         setCampaigns([]);
+        setAdSets([]);
+        setAds([]);
       } finally {
         if (!cancelled) setLoadedFor(requestKey);
       }
@@ -265,6 +274,16 @@ export default function MetaAdsPage() {
               </div>
             )}
           </Card>
+
+          {/* Full audit: every ad set, every ad copy, and the sales each one produced. */}
+          <AdAudit
+            numericAccountId={account?.accountId ?? ""}
+            currency={currency}
+            loading={stale || campaigns === null || adSets === null || ads === null}
+            campaigns={campaigns ?? []}
+            adSets={adSets ?? []}
+            ads={ads ?? []}
+          />
         </>
       )}
 

@@ -195,6 +195,151 @@ export async function listCampaigns(accountId: string, preset: DatePreset, limit
   }));
 }
 
+/* -------------------------------- Ad Sets --------------------------------- */
+
+export interface AdSet {
+  id: string;
+  name: string;
+  campaignId: string;
+  status: string;
+  /** Meta returns budgets in the account currency's minor unit (cents for EUR/USD). Already divided down. */
+  dailyBudget: number | null;
+  lifetimeBudget: number | null;
+  insights: AdInsights;
+}
+
+/** Meta reports budgets in minor units (cents); everything else in this file is already in major units. */
+function minorToMajor(v: unknown): number | null {
+  const n = num(v);
+  return n === null ? null : n / 100;
+}
+
+/** Every ad set in the account, tagged with its campaign — the audit groups them client-side rather than one call per campaign. */
+export async function listAdSets(accountId: string, preset: DatePreset, limit = 200): Promise<AdSet[]> {
+  const res = await ads<{
+    data?: {
+      id: string; name?: string; campaign_id?: string; status?: string;
+      daily_budget?: string; lifetime_budget?: string;
+      insights?: { data?: RawInsight[] };
+    }[];
+  }>(`${accountId}/adsets`, {
+    fields: `id,name,campaign_id,status,daily_budget,lifetime_budget,insights.date_preset(${preset}){${INSIGHT_FIELDS}}`,
+    limit,
+  });
+
+  return (res.data ?? []).map((s) => ({
+    id: s.id,
+    name: s.name ?? "(unnamed ad set)",
+    campaignId: s.campaign_id ?? "",
+    status: s.status ?? "UNKNOWN",
+    dailyBudget: minorToMajor(s.daily_budget),
+    lifetimeBudget: minorToMajor(s.lifetime_budget),
+    insights: shapeInsights(s.insights?.data?.[0]),
+  }));
+}
+
+/* ----------------------------- Ads & creatives ----------------------------- */
+
+export type AdMediaType = "IMAGE" | "VIDEO" | "CAROUSEL" | "UNKNOWN";
+
+export interface AdCreative {
+  id: string;
+  name: string;
+  /** The ad copy — the primary text shown with the ad. */
+  bodyText: string | null;
+  title: string | null;
+  mediaType: AdMediaType;
+  thumbnailUrl: string | null;
+  imageUrl: string | null;
+  videoId: string | null;
+  callToAction: string | null;
+}
+
+export interface Ad {
+  id: string;
+  name: string;
+  adsetId: string;
+  campaignId: string;
+  status: string;
+  creative: AdCreative | null;
+  insights: AdInsights;
+}
+
+interface RawCreative {
+  id?: string;
+  name?: string;
+  thumbnail_url?: string;
+  image_url?: string;
+  body?: string;
+  title?: string;
+  object_type?: string;
+  video_id?: string;
+  object_story_spec?: {
+    link_data?: {
+      message?: string; name?: string; picture?: string;
+      call_to_action?: { type?: string };
+      child_attachments?: unknown[];
+    };
+    video_data?: { message?: string; title?: string; image_url?: string; video_id?: string; call_to_action?: { type?: string } };
+  };
+}
+
+function parseCreative(raw: RawCreative | undefined): AdCreative | null {
+  if (!raw) return null;
+  const link = raw.object_story_spec?.link_data;
+  const video = raw.object_story_spec?.video_data;
+  const videoId = raw.video_id ?? video?.video_id ?? null;
+  const isCarousel = Boolean(link?.child_attachments?.length) || raw.object_type === "CAROUSEL";
+
+  let mediaType: AdMediaType = "UNKNOWN";
+  if (isCarousel) mediaType = "CAROUSEL";
+  else if (videoId) mediaType = "VIDEO";
+  else if (raw.image_url || raw.thumbnail_url || link?.picture) mediaType = "IMAGE";
+
+  return {
+    id: raw.id ?? "",
+    name: raw.name ?? "",
+    bodyText: raw.body ?? link?.message ?? video?.message ?? null,
+    title: raw.title ?? link?.name ?? video?.title ?? null,
+    mediaType,
+    thumbnailUrl: raw.thumbnail_url ?? video?.image_url ?? null,
+    imageUrl: raw.image_url ?? link?.picture ?? null,
+    videoId,
+    callToAction: link?.call_to_action?.type ?? video?.call_to_action?.type ?? null,
+  };
+}
+
+const CREATIVE_FIELDS = "id,name,thumbnail_url,image_url,body,title,object_type,video_id,object_story_spec";
+
+/**
+ * Every ad in the account — the audit's actual unit. Each one carries its
+ * own creative (the ad copy, the image or video) and its own insights, so
+ * "which ad copy produced which sales" is answered directly, not estimated
+ * from the ad set it sits in.
+ */
+export async function listAds(accountId: string, preset: DatePreset, limit = 200): Promise<Ad[]> {
+  const res = await ads<{
+    data?: {
+      id: string; name?: string; adset_id?: string; campaign_id?: string; status?: string;
+      creative?: RawCreative;
+      insights?: { data?: RawInsight[] };
+    }[];
+  }>(`${accountId}/ads`, {
+    fields: `id,name,adset_id,campaign_id,status,creative{${CREATIVE_FIELDS}},insights.date_preset(${preset}){${INSIGHT_FIELDS}}`,
+    limit,
+  });
+
+  return (res.data ?? []).map((a) => ({
+    id: a.id,
+    name: a.name ?? "(unnamed ad)",
+    adsetId: a.adset_id ?? "",
+    campaignId: a.campaign_id ?? "",
+    status: a.status ?? "UNKNOWN",
+    creative: parseCreative(a.creative),
+    insights: shapeInsights(a.insights?.data?.[0]),
+  }));
+}
+
 /* ------------------------------ Availability ------------------------------ */
 
 export interface AdsAvailability {

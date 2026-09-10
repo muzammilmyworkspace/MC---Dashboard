@@ -529,6 +529,30 @@ export interface AdCampaign {
   id: string; name: string; status: string; objective: string | null; insights: AdInsights;
 }
 
+export interface AdSet {
+  id: string; name: string; campaignId: string; status: string;
+  dailyBudget: number | null; lifetimeBudget: number | null; insights: AdInsights;
+}
+
+export type AdMediaType = "IMAGE" | "VIDEO" | "CAROUSEL" | "UNKNOWN";
+
+export interface AdCreative {
+  id: string; name: string;
+  /** The ad copy — the primary text shown with the ad. */
+  bodyText: string | null;
+  title: string | null;
+  mediaType: AdMediaType;
+  thumbnailUrl: string | null;
+  imageUrl: string | null;
+  videoId: string | null;
+  callToAction: string | null;
+}
+
+export interface Ad {
+  id: string; name: string; adsetId: string; campaignId: string; status: string;
+  creative: AdCreative | null; insights: AdInsights;
+}
+
 export interface AdsAvailability {
   available: boolean; reason: string | null; accounts: AdAccount[];
 }
@@ -688,6 +712,10 @@ export const api = {
       get<{ campaigns: AdCampaign[] }>(
         `/api/meta-ads/campaigns?accountId=${encodeURIComponent(accountId)}&preset=${preset}`
       ),
+    adSets: (accountId: string, preset: AdDatePreset = "last_30d") =>
+      get<{ adSets: AdSet[] }>(`/api/meta-ads/adsets?accountId=${encodeURIComponent(accountId)}&preset=${preset}`),
+    ads: (accountId: string, preset: AdDatePreset = "last_30d") =>
+      get<{ ads: Ad[] }>(`/api/meta-ads/ads?accountId=${encodeURIComponent(accountId)}&preset=${preset}`),
 
     /* --- Facebook Pages -------------------------------------------------- */
     facebookPages: () => get<{ pages: FacebookPage[] }>("/api/facebook/pages"),
