@@ -128,6 +128,9 @@ async function metaFetch<T>(url: string, init?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const err = (body as MetaErrorBody)?.error;
+    // Safe to log: Meta's own error description, not a credential — the URL (which does
+    // carry the app secret for the token exchange) is deliberately never passed here.
+    console.error(`[meta-oauth] ${res.status}: ${JSON.stringify(err ?? {})}`);
     throw new MetaOAuthError(metaErrorCode(err), humanMetaError(err, res.status));
   }
   return body as T;
