@@ -195,6 +195,42 @@ export async function listCampaigns(accountId: string, preset: DatePreset, limit
   }));
 }
 
+/* ------------------------------ Insights by level -------------------------- */
+
+/**
+ * One flat, aggregated report instead of nesting `insights{...}` inside
+ * every ad-set or ad returned by its own edge.
+ *
+ * Nesting insights inside e.g. `act_X/ads?fields=...,insights{...}` makes
+ * Meta compute a separate aggregation per row — fine for a handful of
+ * campaigns, but for dozens of ad sets or ads it regularly blew past
+ * Vercel's 30s function limit and took the whole page down with it.
+ * `act_X/insights?level=ad` asks for the same numbers as one report, which
+ * is the query pattern Meta's own Ads Manager reporting uses and returns in
+ * a fraction of the time.
+ */
+async function insightsByLevel(
+  accountId: string,
+  preset: DatePreset,
+  level: "campaign" | "adset" | "ad",
+  limit = 500
+): Promise<Map<string, AdInsights>> {
+  const idField = `${level}_id`;
+  const res = await ads<{ data?: (RawInsight & Record<string, string>)[] }>(`${accountId}/insights`, {
+    level,
+    fields: `${idField},${INSIGHT_FIELDS}`,
+    date_preset: preset,
+    limit,
+  });
+
+  const map = new Map<string, AdInsights>();
+  for (const row of res.data ?? []) {
+    const id = row[idField];
+    if (id) map.set(id, shapeInsights(row));
+  }
+  return map;
+}
+
 /* -------------------------------- Ad Sets --------------------------------- */
 
 export interface AdSet {
@@ -214,18 +250,19 @@ function minorToMajor(v: unknown): number | null {
   return n === null ? null : n / 100;
 }
 
-/** Every ad set in the account, tagged with its campaign — the audit groups them client-side rather than one call per campaign. */
+/**
+ * Every ad set in the account, tagged with its campaign — the audit groups
+ * them client-side rather than one call per campaign. Metadata and insights
+ * are fetched in parallel and merged by id, rather than nested, so a large
+ * account doesn't time out (see `insightsByLevel`).
+ */
 export async function listAdSets(accountId: string, preset: DatePreset, limit = 200): Promise<AdSet[]> {
-  const res = await ads<{
-    data?: {
-      id: string; name?: string; campaign_id?: string; status?: string;
-      daily_budget?: string; lifetime_budget?: string;
-      insights?: { data?: RawInsight[] };
-    }[];
-  }>(`${accountId}/adsets`, {
-    fields: `id,name,campaign_id,status,daily_budget,lifetime_budget,insights.date_preset(${preset}){${INSIGHT_FIELDS}}`,
-    limit,
-  });
+  const [res, insightsMap] = await Promise.all([
+    ads<{
+      data?: { id: string; name?: string; campaign_id?: string; status?: string; daily_budget?: string; lifetime_budget?: string }[];
+    }>(`${accountId}/adsets`, { fields: "id,name,campaign_id,status,daily_budget,lifetime_budget", limit }),
+    insightsByLevel(accountId, preset, "adset"),
+  ]);
 
   return (res.data ?? []).map((s) => ({
     id: s.id,
@@ -234,7 +271,7 @@ export async function listAdSets(accountId: string, preset: DatePreset, limit = 
     status: s.status ?? "UNKNOWN",
     dailyBudget: minorToMajor(s.daily_budget),
     lifetimeBudget: minorToMajor(s.lifetime_budget),
-    insights: shapeInsights(s.insights?.data?.[0]),
+    insights: insightsMap.get(s.id) ?? shapeInsights(undefined),
   }));
 }
 
@@ -318,16 +355,15 @@ const CREATIVE_FIELDS = "id,name,thumbnail_url,image_url,body,title,object_type,
  * from the ad set it sits in.
  */
 export async function listAds(accountId: string, preset: DatePreset, limit = 200): Promise<Ad[]> {
-  const res = await ads<{
-    data?: {
-      id: string; name?: string; adset_id?: string; campaign_id?: string; status?: string;
-      creative?: RawCreative;
-      insights?: { data?: RawInsight[] };
-    }[];
-  }>(`${accountId}/ads`, {
-    fields: `id,name,adset_id,campaign_id,status,creative{${CREATIVE_FIELDS}},insights.date_preset(${preset}){${INSIGHT_FIELDS}}`,
-    limit,
-  });
+  const [res, insightsMap] = await Promise.all([
+    ads<{
+      data?: {
+        id: string; name?: string; adset_id?: string; campaign_id?: string; status?: string;
+        creative?: RawCreative;
+      }[];
+    }>(`${accountId}/ads`, { fields: `id,name,adset_id,campaign_id,status,creative{${CREATIVE_FIELDS}}`, limit }),
+    insightsByLevel(accountId, preset, "ad"),
+  ]);
 
   return (res.data ?? []).map((a) => ({
     id: a.id,
@@ -336,7 +372,7 @@ export async function listAds(accountId: string, preset: DatePreset, limit = 200
     campaignId: a.campaign_id ?? "",
     status: a.status ?? "UNKNOWN",
     creative: parseCreative(a.creative),
-    insights: shapeInsights(a.insights?.data?.[0]),
+    insights: insightsMap.get(a.id) ?? shapeInsights(undefined),
   }));
 }
 

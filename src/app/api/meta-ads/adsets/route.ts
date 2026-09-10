@@ -18,6 +18,7 @@ export async function GET(req: Request) {
   try {
     return NextResponse.json({ accountId, preset, adSets: await listAdSets(accountId, preset) });
   } catch (err) {
+    console.error(`[meta-ads] adsets failed: ${err instanceof Error ? err.message : err}`);
     return apiError(502, "META_ERROR", err instanceof Error ? err.message : "Marketing API request failed");
   }
 }
