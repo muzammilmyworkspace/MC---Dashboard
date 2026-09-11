@@ -32,14 +32,16 @@ export async function GET(req: Request) {
     const out: unknown[] = [];
 
     for (const account of accounts) {
-      const filtering = encodeURIComponent(JSON.stringify([{ field: "name", operator: "CONTAIN", value: nameQuery }]));
-      const adsRes = await providerRequest<{ data?: { id: string; name?: string; adset_id?: string; campaign_id?: string }[] }>({
+      const adsRes = await providerRequest<{ data?: { id: string; name?: string; adset_id?: string; campaign_id?: string; effective_status?: string }[] }>({
         provider: "meta-ads-debug",
-        url: `${GRAPH}/${env.META_GRAPH_VERSION}/${account.id}/ads?fields=id,name,adset_id,campaign_id&filtering=${filtering}&limit=50`,
+        url: `${GRAPH}/${env.META_GRAPH_VERSION}/${account.id}/ads?fields=id,name,adset_id,campaign_id,effective_status&limit=500`,
         token,
         cacheTtlMs: 0,
       });
-      const matchedAds = adsRes.data ?? [];
+      const lowerQuery = nameQuery.toLowerCase();
+      const allAds = adsRes.data ?? [];
+      const matchedAds = allAds.filter((a) => a.name?.toLowerCase().includes(lowerQuery));
+      out.push({ account: account.name, totalAdsSeen: allAds.length, sampleNames: allAds.slice(0, 5).map((a) => a.name) });
       if (matchedAds.length === 0) continue;
 
       for (const ad of matchedAds) {
