@@ -73,6 +73,9 @@ const schema = z.object({
 
   /** Vercel Blob store token — holds our own copy of outbound voice notes so they stay playable after sending. */
   BLOB_READ_WRITE_TOKEN: z.string().optional(),
+
+  /** Guards a temporary diagnostic route. Not used anywhere permanent. */
+  DEBUG_SECRET: z.string().optional(),
 });
 
 const parsed = schema.safeParse(process.env);
