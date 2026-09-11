@@ -22,7 +22,7 @@ export async function GET(req: Request) {
   const secret = url.searchParams.get("secret");
   if (!secret || secret !== env.DEBUG_SECRET) return apiError(401, "UNAUTHORIZED", "Not authorized.");
 
-  const nameQuery = (url.searchParams.get("name") ?? "").toLowerCase();
+  const nameQuery = url.searchParams.get("name") ?? "";
   const since = url.searchParams.get("since") ?? "2026-08-12";
   const until = url.searchParams.get("until") ?? "2026-09-10";
   const token = (env.META_ACCESS_TOKEN ?? "").trim();
@@ -32,35 +32,28 @@ export async function GET(req: Request) {
     const out: unknown[] = [];
 
     for (const account of accounts) {
-      const campaignsRes = await providerRequest<{ data?: { id: string; name?: string }[] }>({
+      const filtering = encodeURIComponent(JSON.stringify([{ field: "name", operator: "CONTAIN", value: nameQuery }]));
+      const adsRes = await providerRequest<{ data?: { id: string; name?: string; adset_id?: string; campaign_id?: string }[] }>({
         provider: "meta-ads-debug",
-        url: `${GRAPH}/${env.META_GRAPH_VERSION}/${account.id}/campaigns?fields=id,name&limit=200`,
+        url: `${GRAPH}/${env.META_GRAPH_VERSION}/${account.id}/ads?fields=id,name,adset_id,campaign_id&filtering=${filtering}&limit=50`,
         token,
         cacheTtlMs: 0,
       });
-      const campaigns = (campaignsRes.data ?? []).filter((c) => c.name?.toLowerCase().includes(nameQuery));
+      const matchedAds = adsRes.data ?? [];
+      if (matchedAds.length === 0) continue;
 
-      for (const campaign of campaigns) {
-        const adsetsRes = await providerRequest<{ data?: { id: string; name?: string }[] }>({
+      for (const ad of matchedAds) {
+        const insightsRes = await providerRequest<{ data?: unknown[] }>({
           provider: "meta-ads-debug",
-          url: `${GRAPH}/${env.META_GRAPH_VERSION}/${campaign.id}/adsets?fields=id,name&limit=200`,
+          url: `${GRAPH}/${env.META_GRAPH_VERSION}/${ad.id}/insights?fields=ad_id,ad_name,spend,actions,action_values,purchase_roas&time_range=${encodeURIComponent(JSON.stringify({ since, until }))}`,
           token,
           cacheTtlMs: 0,
         });
-
-        for (const adset of adsetsRes.data ?? []) {
-          const insightsRes = await providerRequest<{ data?: unknown[] }>({
-            provider: "meta-ads-debug",
-            url: `${GRAPH}/${env.META_GRAPH_VERSION}/${adset.id}/insights?level=ad&fields=ad_id,ad_name,spend,actions,action_values,purchase_roas&time_range=${encodeURIComponent(JSON.stringify({ since, until }))}`,
-            token,
-            cacheTtlMs: 0,
-          });
-          out.push({ account: account.name, campaign: campaign.name, adset: adset.name, adsetId: adset.id, insights: insightsRes.data ?? [] });
-        }
+        out.push({ account: account.name, ad, insights: insightsRes.data ?? [] });
       }
     }
 
-    return NextResponse.json({ since, until, matches: out });
+    return NextResponse.json({ since, until, nameQuery, matches: out });
   } catch (err) {
     return apiError(500, "DEBUG_ERROR", err instanceof Error ? err.message : "Unknown error");
   }
