@@ -34,36 +34,29 @@ export async function GET(req: Request) {
 
     if (adsetName) {
       for (const account of accounts) {
-        const campaignsRes = await providerRequest<{ data?: { id: string; name?: string }[] }>({
+        // One filtered call instead of scanning every campaign — avoids repeating the rate-limit hit.
+        const filtering = encodeURIComponent(JSON.stringify([{ field: "name", operator: "CONTAIN", value: adsetName }]));
+        const adsetsRes = await providerRequest<{ data?: { id: string; name?: string; campaign_id?: string }[] }>({
           provider: "meta-ads-debug",
-          url: `${GRAPH}/${env.META_GRAPH_VERSION}/${account.id}/campaigns?fields=id,name&limit=500`,
+          url: `${GRAPH}/${env.META_GRAPH_VERSION}/${account.id}/adsets?fields=id,name,campaign_id&filtering=${filtering}&limit=50`,
           token,
           cacheTtlMs: 0,
         });
-        for (const campaign of campaignsRes.data ?? []) {
-          const adsetsRes = await providerRequest<{ data?: { id: string; name?: string }[] }>({
+        for (const adset of adsetsRes.data ?? []) {
+          const adsRes = await providerRequest<{ data?: { id: string; name?: string; effective_status?: string }[] }>({
             provider: "meta-ads-debug",
-            url: `${GRAPH}/${env.META_GRAPH_VERSION}/${campaign.id}/adsets?fields=id,name&limit=200`,
+            url: `${GRAPH}/${env.META_GRAPH_VERSION}/${adset.id}/ads?fields=id,name,effective_status&limit=200`,
             token,
             cacheTtlMs: 0,
           });
-          const matchedAdsets = (adsetsRes.data ?? []).filter((s) => s.name?.toLowerCase().includes(adsetName.toLowerCase()));
-          for (const adset of matchedAdsets) {
-            const adsRes = await providerRequest<{ data?: { id: string; name?: string; effective_status?: string }[] }>({
+          for (const ad of adsRes.data ?? []) {
+            const insightsRes = await providerRequest<{ data?: unknown[] }>({
               provider: "meta-ads-debug",
-              url: `${GRAPH}/${env.META_GRAPH_VERSION}/${adset.id}/ads?fields=id,name,effective_status&limit=200`,
+              url: `${GRAPH}/${env.META_GRAPH_VERSION}/${ad.id}/insights?fields=ad_id,ad_name,spend,actions,action_values,purchase_roas&time_range=${encodeURIComponent(JSON.stringify({ since, until }))}`,
               token,
               cacheTtlMs: 0,
             });
-            for (const ad of adsRes.data ?? []) {
-              const insightsRes = await providerRequest<{ data?: unknown[] }>({
-                provider: "meta-ads-debug",
-                url: `${GRAPH}/${env.META_GRAPH_VERSION}/${ad.id}/insights?fields=ad_id,ad_name,spend,actions,action_values,purchase_roas&time_range=${encodeURIComponent(JSON.stringify({ since, until }))}`,
-                token,
-                cacheTtlMs: 0,
-              });
-              out.push({ account: account.name, campaign: campaign.name, adset: adset.name, ad, insights: insightsRes.data ?? [] });
-            }
+            out.push({ account: account.name, adset: adset.name, campaignId: adset.campaign_id, ad, insights: insightsRes.data ?? [] });
           }
         }
       }
