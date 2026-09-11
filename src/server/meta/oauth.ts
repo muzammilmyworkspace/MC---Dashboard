@@ -111,6 +111,24 @@ interface MetaErrorBody {
 }
 
 /**
+ * Instagram's `user_id` (e.g. from api.instagram.com/oauth/access_token) is a
+ * 17-digit integer sent as a bare JSON number, not a quoted string. That
+ * exceeds Number.MAX_SAFE_INTEGER, so plain JSON.parse silently rounds the
+ * last digit(s) off — every downstream Graph API call then targets a node
+ * that "does not exist" because the id is wrong. Quoting any 16+ digit bare
+ * integer before parsing keeps it exact, as a string, matching how every
+ * other Meta id in this codebase is already typed.
+ */
+function parseJsonPreservingLargeIds(text: string): unknown {
+  const safe = text.replace(/:(\s*)(-?\d{16,})(\s*[,}\]])/g, ':$1"$2"$3');
+  try {
+    return JSON.parse(safe);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Deliberately not the shared providerRequest helper: that caches by URL, and
  * these calls carry the app secret and the authorization code. Nothing here is
  * cached and no URL containing a credential is ever retained.
@@ -124,12 +142,7 @@ async function metaFetch<T>(url: string, init?: RequestInit): Promise<T> {
   }
 
   const text = await res.text();
-  let body: unknown;
-  try {
-    body = JSON.parse(text);
-  } catch {
-    body = null;
-  }
+  const body = parseJsonPreservingLargeIds(text);
 
   if (!res.ok) {
     // Instagram's own OAuth endpoints (api.instagram.com) shape errors as
