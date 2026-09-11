@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, History, Mic, Search, Send, Square, X } from "lucide-react";
+import { AlertTriangle, History, Maximize2, Mic, Minimize2, Search, Send, Square, X } from "lucide-react";
 import { api, ApiRequestError, type MetaConversation, type MetaMessage, type MetaMessagesResponse } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -32,6 +32,17 @@ export function MessagesInbox() {
   const [unrepliedOnly, setUnrepliedOnly] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [fullScreen, setFullScreen] = useState(false);
+
+  // Exit full screen with Escape, matching every other full-screen overlay's expected behavior.
+  useEffect(() => {
+    if (!fullScreen) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setFullScreen(false);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [fullScreen]);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search.trim()), 300);
@@ -108,57 +119,78 @@ export function MessagesInbox() {
   }
 
   return (
-    <Card className="flex h-[680px] overflow-hidden p-0">
-      <div className="flex w-[300px] shrink-0 flex-col border-r border-border">
-        <div className="space-y-2 border-b border-border p-3">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search people…" className="h-8 pl-8 text-xs" />
-          </div>
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => setUnrepliedOnly((v) => !v)}
-              className={cn(
-                "flex-1 rounded-lg border px-2.5 py-1.5 text-left text-xs font-medium transition-colors",
-                unrepliedOnly ? "border-warning/40 bg-warning/10 text-warning" : "border-border text-muted-foreground hover:text-foreground"
-              )}
-            >
-              No reply in 24h+{unrepliedOnly ? " · showing" : ""}
-            </button>
-            <button
-              onClick={() => void handleSync()}
-              disabled={syncing}
-              title="Import conversation history from before this connection was fixed"
-              className="shrink-0 rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
-            >
-              <History className={cn("size-3.5", syncing && "animate-pulse")} />
-            </button>
-          </div>
-        </div>
-
-        <div className="no-scrollbar flex-1 overflow-y-auto">
-          {listError ? (
-            <p className="p-4 text-xs text-danger">{listError}</p>
-          ) : conversations.length === 0 ? (
-            <p className="p-6 text-center text-xs text-muted-foreground">
-              {unrepliedOnly || debouncedSearch ? "No conversations match." : "No conversations yet."}
-            </p>
-          ) : (
-            conversations.map((c) => (
-              <ConversationRow key={c.id} conv={c} active={c.id === selectedId} onClick={() => setSelectedId(c.id)} />
-            ))
-          )}
-        </div>
-      </div>
-
-      <div className="flex flex-1 flex-col">
-        {selectedId ? (
-          <ThreadView key={selectedId} conversationId={selectedId} onMessageSent={() => void loadList()} />
-        ) : (
-          <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">Select a conversation</div>
+    <>
+      {fullScreen && <div className="fixed inset-0 z-40 bg-background/80 backdrop-blur-sm" onClick={() => setFullScreen(false)} />}
+      <Card
+        className={cn(
+          "flex flex-col overflow-hidden p-0",
+          fullScreen ? "fixed inset-3 z-50 sm:inset-6" : "h-[680px]"
         )}
-      </div>
-    </Card>
+      >
+        <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2.5">
+          <p className="text-sm font-semibold">Messages</p>
+          <button
+            onClick={() => setFullScreen((v) => !v)}
+            title={fullScreen ? "Exit full screen" : "Open full screen, like Instagram"}
+            className="rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:text-foreground"
+          >
+            {fullScreen ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+          </button>
+        </div>
+
+        <div className="flex flex-1 overflow-hidden">
+          <div className="flex w-[300px] shrink-0 flex-col border-r border-border">
+            <div className="space-y-2 border-b border-border p-3">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search people…" className="h-8 pl-8 text-xs" />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setUnrepliedOnly((v) => !v)}
+                  className={cn(
+                    "flex-1 rounded-lg border px-2.5 py-1.5 text-left text-xs font-medium transition-colors",
+                    unrepliedOnly ? "border-warning/40 bg-warning/10 text-warning" : "border-border text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  No reply in 24h+{unrepliedOnly ? " · showing" : ""}
+                </button>
+                <button
+                  onClick={() => void handleSync()}
+                  disabled={syncing}
+                  title="Import conversation history from before this connection was fixed"
+                  className="shrink-0 rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+                >
+                  <History className={cn("size-3.5", syncing && "animate-pulse")} />
+                </button>
+              </div>
+            </div>
+
+            <div className="no-scrollbar flex-1 overflow-y-auto">
+              {listError ? (
+                <p className="p-4 text-xs text-danger">{listError}</p>
+              ) : conversations.length === 0 ? (
+                <p className="p-6 text-center text-xs text-muted-foreground">
+                  {unrepliedOnly || debouncedSearch ? "No conversations match." : "No conversations yet."}
+                </p>
+              ) : (
+                conversations.map((c) => (
+                  <ConversationRow key={c.id} conv={c} active={c.id === selectedId} onClick={() => setSelectedId(c.id)} />
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-1 flex-col">
+            {selectedId ? (
+              <ThreadView key={selectedId} conversationId={selectedId} onMessageSent={() => void loadList()} />
+            ) : (
+              <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">Select a conversation</div>
+            )}
+          </div>
+        </div>
+      </Card>
+    </>
   );
 }
 
