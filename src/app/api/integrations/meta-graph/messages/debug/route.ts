@@ -22,10 +22,17 @@ export async function GET(req: Request) {
 
   try {
     const account = await requireConnectedAccount();
-    const url = `https://graph.instagram.com/${env.META_GRAPH_VERSION}/${account.igUserId}/conversations?fields=participants,updated_time,messages.limit(5){id,message,from,to,created_time}`;
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${account.igAccessToken}` } });
-    const body = await res.text();
-    return NextResponse.json({ status: res.status, igUserId: account.igUserId, body: body.slice(0, 4000) });
+    const base = `https://graph.instagram.com/${env.META_GRAPH_VERSION}/${account.igUserId}`;
+    const auth = { Authorization: `Bearer ${account.igAccessToken}` };
+
+    const [conversations, subscribedGet, subscribePost, me] = await Promise.all([
+      fetch(`${base}/conversations?fields=participants,updated_time,messages.limit(5){id,message,from,to,created_time}`, { headers: auth }).then(async (r) => ({ status: r.status, body: (await r.text()).slice(0, 1000) })),
+      fetch(`${base}/subscribed_apps`, { headers: auth }).then(async (r) => ({ status: r.status, body: (await r.text()).slice(0, 1000) })),
+      fetch(`${base}/subscribed_apps?subscribed_fields=messages`, { method: "POST", headers: auth }).then(async (r) => ({ status: r.status, body: (await r.text()).slice(0, 1000) })),
+      fetch(`${base.replace(account.igUserId, "me")}?fields=id,username,account_type`, { headers: auth }).then(async (r) => ({ status: r.status, body: (await r.text()).slice(0, 1000) })),
+    ]);
+
+    return NextResponse.json({ igUserId: account.igUserId, me, conversations, subscribedGet, subscribePost });
   } catch (err) {
     return apiError(500, "DEBUG_ERROR", err instanceof Error ? err.message : "Unknown error");
   }
