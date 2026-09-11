@@ -53,7 +53,13 @@ export async function GET(req: Request) {
       }
     }
 
-    return NextResponse.json({ since, until, nameQuery, matches: out });
+    return NextResponse.json({
+      since,
+      until,
+      nameQuery,
+      accounts: accounts.map((a) => ({ id: a.id, name: a.name, status: a.statusLabel })),
+      matches: out,
+    });
   } catch (err) {
     return apiError(500, "DEBUG_ERROR", err instanceof Error ? err.message : "Unknown error");
   }
