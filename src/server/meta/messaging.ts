@@ -240,6 +240,110 @@ export async function recordInboundMessage(event: InboundEvent, igAuth: IgAuth):
   });
 }
 
+/* --------------------------------- backfill --------------------------------- */
+
+interface GraphParticipant {
+  id?: string;
+  username?: string;
+}
+interface GraphMessage {
+  id: string;
+  message?: string;
+  from?: GraphParticipant;
+  created_time?: string;
+}
+interface GraphConversation {
+  participants?: { data?: GraphParticipant[] };
+  messages?: { data?: GraphMessage[] };
+}
+
+/**
+ * One-time historical import: pulls conversations directly from the Graph
+ * API for any contact the webhook has never recorded yet. Only used to
+ * backfill history from before the webhook subscription was working —
+ * everything from here on arrives live via the webhook instead.
+ *
+ * Safe to re-run: a conversation already present locally is left
+ * untouched, so this never re-creates or duplicates a message the webhook
+ * already stored.
+ *
+ * The "self" participant is matched by username, not by igUserId — the
+ * conversations/messages edge identifies participants with a different
+ * Instagram id namespace (IGSID) than the one `/me` and the Send API use
+ * for the same account, so comparing ids here would misclassify every
+ * message.
+ */
+export async function syncHistoricalConversations(): Promise<{ imported: number; skipped: number }> {
+  const [auth, status] = await Promise.all([requireConnectedAccount(), metaConnectionStatus()]);
+  const selfUsername = status.account?.igUsername;
+  if (!selfUsername) throw new MessagingUnavailableError("no_token", "The Instagram connection is missing its username — reconnect it.");
+
+  const res = await graphGet<{ data?: GraphConversation[] }>(
+    `${auth.igUserId}/conversations`,
+    { fields: "participants,messages.limit(100){id,message,from,created_time}", limit: "100" },
+    auth.igAccessToken
+  );
+
+  let imported = 0;
+  let skipped = 0;
+
+  for (const conv of res.data ?? []) {
+    const participants = conv.participants?.data ?? [];
+    const other = participants.length === 2 ? participants.find((p) => p.username !== selfUsername) : undefined;
+    if (!other?.id) continue;
+
+    const existing = await prisma.igConversation.findUnique({ where: { id: other.id } });
+    if (existing) {
+      skipped++;
+      continue;
+    }
+
+    const messages = [...(conv.messages?.data ?? [])].reverse(); // Graph returns newest-first; store oldest-first.
+    if (messages.length === 0) continue;
+
+    const profile = await lookupProfile(other.id, auth.igAccessToken);
+
+    await prisma.igConversation.create({
+      data: {
+        id: other.id,
+        igUsername: profile?.username ?? other.username ?? null,
+        igName: profile?.name ?? null,
+        profilePicUrl: profile?.profile_pic ?? null,
+      },
+    });
+
+    let lastMessageAt: Date | null = null;
+    let lastMessagePreview = "";
+    let lastMessageDirection: IgMsgDirection | null = null;
+
+    for (const m of messages) {
+      const direction = m.from?.username === selfUsername ? IgMsgDirection.OUTBOUND : IgMsgDirection.INBOUND;
+      const text = m.message ?? "";
+      const sentAt = m.created_time ? new Date(m.created_time) : new Date();
+      const preview = text || "Message";
+
+      await prisma.igMessage.upsert({
+        where: { id: m.id },
+        create: { id: m.id, conversationId: other.id, direction, type: text ? IgMsgType.TEXT : IgMsgType.UNSUPPORTED, text, sentAt },
+        update: {},
+      });
+
+      lastMessageAt = sentAt;
+      lastMessagePreview = preview;
+      lastMessageDirection = direction;
+    }
+
+    await prisma.igConversation.update({
+      where: { id: other.id },
+      data: { lastMessageAt, lastMessagePreview, lastMessageDirection, unread: lastMessageDirection === IgMsgDirection.INBOUND },
+    });
+
+    imported++;
+  }
+
+  return { imported, skipped };
+}
+
 /* --------------------------------- sending --------------------------------- */
 
 interface SendResult {

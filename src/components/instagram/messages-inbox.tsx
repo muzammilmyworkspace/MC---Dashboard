@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, Mic, Search, Send, Square, X } from "lucide-react";
+import { AlertTriangle, History, Mic, Search, Send, Square, X } from "lucide-react";
 import { api, ApiRequestError, type MetaConversation, type MetaMessage, type MetaMessagesResponse } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -31,6 +31,7 @@ export function MessagesInbox() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [unrepliedOnly, setUnrepliedOnly] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search.trim()), 300);
@@ -91,6 +92,21 @@ export function MessagesInbox() {
 
   if (!readiness) return <Card className="h-[680px] animate-pulse bg-muted/40" />;
 
+  async function handleSync() {
+    setSyncing(true);
+    try {
+      const res = await api.integrations.metaSyncHistory();
+      toast(res.imported > 0 ? `Imported ${res.imported} conversation${res.imported === 1 ? "" : "s"}` : "Nothing new to import", {
+        description: res.skipped > 0 ? `${res.skipped} already up to date.` : undefined,
+      });
+      await loadList();
+    } catch (err) {
+      toast.error("Couldn't import history", { description: err instanceof ApiRequestError ? err.message : "Try again." });
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   return (
     <Card className="flex h-[680px] overflow-hidden p-0">
       <div className="flex w-[300px] shrink-0 flex-col border-r border-border">
@@ -99,15 +115,25 @@ export function MessagesInbox() {
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search people…" className="h-8 pl-8 text-xs" />
           </div>
-          <button
-            onClick={() => setUnrepliedOnly((v) => !v)}
-            className={cn(
-              "w-full rounded-lg border px-2.5 py-1.5 text-left text-xs font-medium transition-colors",
-              unrepliedOnly ? "border-warning/40 bg-warning/10 text-warning" : "border-border text-muted-foreground hover:text-foreground"
-            )}
-          >
-            No reply in 24h+{unrepliedOnly ? " · showing" : ""}
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setUnrepliedOnly((v) => !v)}
+              className={cn(
+                "flex-1 rounded-lg border px-2.5 py-1.5 text-left text-xs font-medium transition-colors",
+                unrepliedOnly ? "border-warning/40 bg-warning/10 text-warning" : "border-border text-muted-foreground hover:text-foreground"
+              )}
+            >
+              No reply in 24h+{unrepliedOnly ? " · showing" : ""}
+            </button>
+            <button
+              onClick={() => void handleSync()}
+              disabled={syncing}
+              title="Import conversation history from before this connection was fixed"
+              className="shrink-0 rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+            >
+              <History className={cn("size-3.5", syncing && "animate-pulse")} />
+            </button>
+          </div>
         </div>
 
         <div className="no-scrollbar flex-1 overflow-y-auto">

@@ -750,6 +750,7 @@ export const api = {
         body: form,
       });
     },
+    metaSyncHistory: () => post<{ imported: number; skipped: number }>("/api/integrations/meta-graph/messages/sync"),
 
     /* --- Meta Ads (Marketing API) --------------------------------------- */
     adAccounts: () => get<AdsAvailability>("/api/meta-ads/accounts"),
