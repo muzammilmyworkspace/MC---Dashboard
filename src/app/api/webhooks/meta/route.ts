@@ -54,15 +54,21 @@ interface WebhookEntry {
 export async function POST(req: Request) {
   const rawBody = await req.text();
   const signature = req.headers.get("x-hub-signature-256") ?? undefined;
+  // Presence/length only — never the body contents or the signature itself.
+  console.log(`[meta-webhook] POST received · bodyBytes=${rawBody.length} signature=${signature ? "present" : "absent"}`);
 
   // "API setup with Instagram login" is a separate product from the classic
   // Facebook app config — which secret Meta signs this payload with isn't
   // documented for certain, so both are accepted rather than risking every
   // real webhook silently failing signature verification.
   const secrets = [env.META_IG_APP_SECRET, env.META_APP_SECRET].filter((s): s is string => Boolean(s));
-  if (secrets.length === 0) return new NextResponse(null, { status: 503 });
+  if (secrets.length === 0) {
+    console.error("[meta-webhook] rejected — no signing secret configured");
+    return new NextResponse(null, { status: 503 });
+  }
   if (!secrets.some((secret) => verifyGithubSignature(rawBody, signature, secret))) {
     // Unsigned or forged. Never parse the body of an unverified request.
+    console.warn(`[meta-webhook] signature verification failed against ${secrets.length} configured secret(s)`);
     return new NextResponse(null, { status: 401 });
   }
 
