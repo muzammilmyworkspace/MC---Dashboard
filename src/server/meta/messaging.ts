@@ -191,47 +191,62 @@ function inboundKind(msg: InboundMessage): { type: IgMsgType; text: string; medi
 }
 
 /**
- * Persists one inbound message from a verified webhook event. Echoes (our
- * own sent messages, which Meta also delivers back through the same
- * webhook) are skipped — `sendText`/`sendAudio` already recorded those
- * when they were sent.
+ * Persists one message from a verified webhook event — inbound (a contact
+ * messaged us) or an echo (we sent a message, on any surface — our own
+ * dashboard or the Instagram app directly; Meta delivers both through the
+ * same webhook). An echo is skipped only when it's one we already recorded
+ * ourselves: `sendText`/`sendAudio`/`broadcastAudio` store Meta's own
+ * message id as the row id, so a matching id here means "already have it."
+ * An echo with no match means the reply happened outside this dashboard —
+ * the only way to keep the two in sync is to record it now.
  */
 export async function recordInboundMessage(event: InboundEvent, igAuth: IgAuth): Promise<void> {
-  const senderId = event.sender?.id;
   const msg = event.message;
-  if (!senderId || !msg || msg.is_echo) return;
+  if (!msg) return;
 
+  const isEcho = !!msg.is_echo;
+  // An echo reports us as the sender and the contact as the recipient — the opposite of an inbound event.
+  const contactId = isEcho ? event.recipient?.id : event.sender?.id;
+  if (!contactId) return;
+
+  if (isEcho) {
+    if (!msg.mid) return;
+    const existing = await prisma.igMessage.findUnique({ where: { id: msg.mid } });
+    if (existing) return;
+  }
+
+  const direction = isEcho ? IgMsgDirection.OUTBOUND : IgMsgDirection.INBOUND;
   const { type, text, mediaUrl } = inboundKind(msg);
   const sentAt = event.timestamp ? new Date(event.timestamp) : new Date();
   const preview = text || (type === IgMsgType.AUDIO ? "Voice message" : type === IgMsgType.IMAGE ? "Photo" : type === IgMsgType.VIDEO ? "Video" : "Message");
 
-  const existing = await prisma.igConversation.findUnique({ where: { id: senderId } });
-  if (!existing) {
-    const profile = await lookupProfile(senderId, igAuth.igAccessToken);
+  const existingConversation = await prisma.igConversation.findUnique({ where: { id: contactId } });
+  if (!existingConversation) {
+    const profile = await lookupProfile(contactId, igAuth.igAccessToken);
     await prisma.igConversation.create({
       data: {
-        id: senderId,
+        id: contactId,
         igUsername: profile?.username ?? null,
         igName: profile?.name ?? null,
         profilePicUrl: profile?.profile_pic ?? null,
         lastMessageAt: sentAt,
         lastMessagePreview: preview,
-        lastMessageDirection: IgMsgDirection.INBOUND,
-        unread: true,
+        lastMessageDirection: direction,
+        unread: !isEcho,
       },
     });
   } else {
     await prisma.igConversation.update({
-      where: { id: senderId },
-      data: { lastMessageAt: sentAt, lastMessagePreview: preview, lastMessageDirection: IgMsgDirection.INBOUND, unread: true },
+      where: { id: contactId },
+      data: { lastMessageAt: sentAt, lastMessagePreview: preview, lastMessageDirection: direction, unread: !isEcho },
     });
   }
 
   await prisma.igMessage.create({
     data: {
       id: msg.mid ?? undefined,
-      conversationId: senderId,
-      direction: IgMsgDirection.INBOUND,
+      conversationId: contactId,
+      direction,
       type,
       text,
       mediaUrl,
@@ -357,8 +372,10 @@ export async function sendText(conversationId: string, text: string, userId: str
 
   let status: IgMsgStatus = IgMsgStatus.SENT;
   let error: string | null = null;
+  let messageId: string | undefined;
   try {
-    await graphPost<SendResult>(`${auth.igUserId}/messages`, { recipient: { id: conversationId }, message: { text: trimmed } }, auth.igAccessToken);
+    const result = await graphPost<SendResult>(`${auth.igUserId}/messages`, { recipient: { id: conversationId }, message: { text: trimmed } }, auth.igAccessToken);
+    messageId = result.message_id;
   } catch (err) {
     status = IgMsgStatus.FAILED;
     error = err instanceof Error ? err.message : "Send failed.";
@@ -373,8 +390,10 @@ export async function sendText(conversationId: string, text: string, userId: str
       data: { lastMessageAt: sentAt, lastMessagePreview: trimmed, lastMessageDirection: IgMsgDirection.OUTBOUND, unread: false },
     });
   }
+  // Storing Meta's own message id (rather than letting Prisma generate one) is what lets the
+  // webhook's echo of this exact send recognize it later and skip re-recording it as a duplicate.
   const row = await prisma.igMessage.create({
-    data: { conversationId, direction: IgMsgDirection.OUTBOUND, type: IgMsgType.TEXT, text: trimmed, status, error, sentAt, sentByUserId: userId },
+    data: { id: messageId, conversationId, direction: IgMsgDirection.OUTBOUND, type: IgMsgType.TEXT, text: trimmed, status, error, sentAt, sentByUserId: userId },
   });
   if (status === IgMsgStatus.FAILED) throw new MessagingUnavailableError("send_failed", error ?? "Meta rejected the message.");
   return toMessageDto(row);
@@ -405,14 +424,16 @@ export async function sendAudio(conversationId: string, buffer: Buffer, contentT
 
   let status: IgMsgStatus = IgMsgStatus.SENT;
   let error: string | null = null;
+  let messageId: string | undefined;
 
   try {
     const attachmentId = await uploadAudioAttachment(auth, buffer, contentType);
-    await graphPost<SendResult>(
+    const result = await graphPost<SendResult>(
       `${auth.igUserId}/messages`,
       { recipient: { id: conversationId }, message: { attachment: { type: "audio", payload: { attachment_id: attachmentId } } } },
       auth.igAccessToken
     );
+    messageId = result.message_id;
   } catch (err) {
     status = IgMsgStatus.FAILED;
     error = err instanceof Error ? err.message : "Send failed.";
@@ -438,7 +459,7 @@ export async function sendAudio(conversationId: string, buffer: Buffer, contentT
     });
   }
   const row = await prisma.igMessage.create({
-    data: { conversationId, direction: IgMsgDirection.OUTBOUND, type: IgMsgType.AUDIO, mediaUrl, status, error, sentAt, sentByUserId: userId },
+    data: { id: messageId, conversationId, direction: IgMsgDirection.OUTBOUND, type: IgMsgType.AUDIO, mediaUrl, status, error, sentAt, sentByUserId: userId },
   });
   if (status === IgMsgStatus.FAILED) throw new MessagingUnavailableError("send_failed", error ?? "Meta rejected the voice note.");
   return toMessageDto(row);
@@ -490,12 +511,14 @@ export async function broadcastAudio(
     try {
       let status: IgMsgStatus = IgMsgStatus.SENT;
       let error: string | null = null;
+      let messageId: string | undefined;
       try {
-        await graphPost<SendResult>(
+        const result = await graphPost<SendResult>(
           `${auth.igUserId}/messages`,
           { recipient: { id: conversationId }, message: { attachment: { type: "audio", payload: { attachment_id: attachmentId } } } },
           auth.igAccessToken
         );
+        messageId = result.message_id;
       } catch (err) {
         status = IgMsgStatus.FAILED;
         error = err instanceof Error ? err.message : "Send failed.";
@@ -510,6 +533,7 @@ export async function broadcastAudio(
       }
       await prisma.igMessage.create({
         data: {
+          id: messageId,
           conversationId,
           direction: IgMsgDirection.OUTBOUND,
           type: IgMsgType.AUDIO,
