@@ -23,6 +23,7 @@ export async function GET(req: Request) {
   if (!secret || secret !== env.DEBUG_SECRET) return apiError(401, "UNAUTHORIZED", "Not authorized.");
 
   const nameQuery = url.searchParams.get("name") ?? "";
+  const adsetName = url.searchParams.get("adset") ?? "";
   const since = url.searchParams.get("since") ?? "2026-08-12";
   const until = url.searchParams.get("until") ?? "2026-09-10";
   const token = (env.META_ACCESS_TOKEN ?? "").trim();
@@ -30,6 +31,44 @@ export async function GET(req: Request) {
   try {
     const accounts = await listAdAccounts();
     const out: unknown[] = [];
+
+    if (adsetName) {
+      for (const account of accounts) {
+        const campaignsRes = await providerRequest<{ data?: { id: string; name?: string }[] }>({
+          provider: "meta-ads-debug",
+          url: `${GRAPH}/${env.META_GRAPH_VERSION}/${account.id}/campaigns?fields=id,name&limit=500`,
+          token,
+          cacheTtlMs: 0,
+        });
+        for (const campaign of campaignsRes.data ?? []) {
+          const adsetsRes = await providerRequest<{ data?: { id: string; name?: string }[] }>({
+            provider: "meta-ads-debug",
+            url: `${GRAPH}/${env.META_GRAPH_VERSION}/${campaign.id}/adsets?fields=id,name&limit=200`,
+            token,
+            cacheTtlMs: 0,
+          });
+          const matchedAdsets = (adsetsRes.data ?? []).filter((s) => s.name?.toLowerCase().includes(adsetName.toLowerCase()));
+          for (const adset of matchedAdsets) {
+            const adsRes = await providerRequest<{ data?: { id: string; name?: string; effective_status?: string }[] }>({
+              provider: "meta-ads-debug",
+              url: `${GRAPH}/${env.META_GRAPH_VERSION}/${adset.id}/ads?fields=id,name,effective_status&limit=200`,
+              token,
+              cacheTtlMs: 0,
+            });
+            for (const ad of adsRes.data ?? []) {
+              const insightsRes = await providerRequest<{ data?: unknown[] }>({
+                provider: "meta-ads-debug",
+                url: `${GRAPH}/${env.META_GRAPH_VERSION}/${ad.id}/insights?fields=ad_id,ad_name,spend,actions,action_values,purchase_roas&time_range=${encodeURIComponent(JSON.stringify({ since, until }))}`,
+                token,
+                cacheTtlMs: 0,
+              });
+              out.push({ account: account.name, campaign: campaign.name, adset: adset.name, ad, insights: insightsRes.data ?? [] });
+            }
+          }
+        }
+      }
+      return NextResponse.json({ since, until, adsetName, accounts: accounts.map((a) => ({ id: a.id, name: a.name })), matches: out });
+    }
 
     for (const account of accounts) {
       const adsRes = await providerRequest<{ data?: { id: string; name?: string; adset_id?: string; campaign_id?: string; effective_status?: string }[] }>({
