@@ -443,3 +443,91 @@ export async function sendAudio(conversationId: string, buffer: Buffer, contentT
   if (status === IgMsgStatus.FAILED) throw new MessagingUnavailableError("send_failed", error ?? "Meta rejected the voice note.");
   return toMessageDto(row);
 }
+
+export interface BroadcastResult {
+  conversationId: string;
+  status: IgMsgStatus;
+  error: string | null;
+}
+
+/** Upper bound on one broadcast call — keeps it well inside the route's time limit and matches the account's realistic scale. */
+const MAX_BROADCAST_RECIPIENTS = 30;
+
+/**
+ * Sends one recorded voice note to many conversations at once — "forward to
+ * multiple people" for the DM inbox. The recording is uploaded to Meta once
+ * (a reusable attachment, same as a single send) and that one attachment id
+ * is reused for every recipient's Send API call, so the file only leaves
+ * the browser once no matter how many people it goes to.
+ *
+ * Recipients outside Meta's 24h messaging window (see unrepliedOver24h) may
+ * still be rejected by Meta itself — that surfaces as a normal per-recipient
+ * failure here, same as any other declined send.
+ */
+export async function broadcastAudio(
+  conversationIds: string[],
+  buffer: Buffer,
+  contentType: string,
+  userId: string | null
+): Promise<BroadcastResult[]> {
+  const auth = await requireConnectedAccount();
+  const ids = [...new Set(conversationIds)].slice(0, MAX_BROADCAST_RECIPIENTS);
+  if (ids.length === 0) throw new MessagingUnavailableError("empty", "No recipients selected.");
+
+  const attachmentId = await uploadAudioAttachment(auth, buffer, contentType);
+
+  let mediaUrl: string | null = null;
+  try {
+    const blob = await put(`ig-voice-notes/broadcast-${Date.now()}.webm`, buffer, { access: "public", contentType });
+    mediaUrl = blob.url;
+  } catch (err) {
+    console.error(`[ig-messaging] broadcast voice note Blob copy failed: ${err instanceof Error ? err.message : err}`);
+  }
+
+  const results: BroadcastResult[] = [];
+  for (const conversationId of ids) {
+    // One recipient's failure — a Meta rejection or a DB hiccup recording it — must not stop the rest of the broadcast.
+    try {
+      let status: IgMsgStatus = IgMsgStatus.SENT;
+      let error: string | null = null;
+      try {
+        await graphPost<SendResult>(
+          `${auth.igUserId}/messages`,
+          { recipient: { id: conversationId }, message: { attachment: { type: "audio", payload: { attachment_id: attachmentId } } } },
+          auth.igAccessToken
+        );
+      } catch (err) {
+        status = IgMsgStatus.FAILED;
+        error = err instanceof Error ? err.message : "Send failed.";
+      }
+
+      const sentAt = new Date();
+      if (status === IgMsgStatus.SENT) {
+        await prisma.igConversation.update({
+          where: { id: conversationId },
+          data: { lastMessageAt: sentAt, lastMessagePreview: "Voice message", lastMessageDirection: IgMsgDirection.OUTBOUND, unread: false },
+        });
+      }
+      await prisma.igMessage.create({
+        data: {
+          conversationId,
+          direction: IgMsgDirection.OUTBOUND,
+          type: IgMsgType.AUDIO,
+          mediaUrl: status === IgMsgStatus.SENT ? mediaUrl : null,
+          status,
+          error,
+          sentAt,
+          sentByUserId: userId,
+        },
+      });
+
+      results.push({ conversationId, status, error });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unexpected error.";
+      console.error(`[ig-messaging] broadcast failed for ${conversationId}: ${message}`);
+      results.push({ conversationId, status: IgMsgStatus.FAILED, error: message });
+    }
+  }
+
+  return results;
+}

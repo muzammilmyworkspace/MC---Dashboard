@@ -751,6 +751,15 @@ export const api = {
       });
     },
     metaSyncHistory: () => post<{ imported: number; skipped: number }>("/api/integrations/meta-graph/messages/sync"),
+    metaBroadcastAudio: (conversationIds: string[], audio: Blob, filename = "voice-note.webm") => {
+      const form = new FormData();
+      form.set("audio", audio, filename);
+      form.set("conversationIds", JSON.stringify(conversationIds));
+      return raw<{ results: { conversationId: string; status: "SENT" | "FAILED"; error: string | null }[] }>(
+        "/api/integrations/meta-graph/messages/broadcast/audio",
+        { method: "POST", body: form }
+      );
+    },
 
     /* --- Meta Ads (Marketing API) --------------------------------------- */
     adAccounts: () => get<AdsAvailability>("/api/meta-ads/accounts"),
