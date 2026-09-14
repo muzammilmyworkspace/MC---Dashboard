@@ -2,20 +2,21 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { AlertTriangle, RefreshCw } from "lucide-react";
+import { AlertTriangle, Calendar, RefreshCw } from "lucide-react";
 import {
-  api, ApiRequestError,
-  type AdAccount, type AdCampaign, type AdDatePreset, type AdInsights, type AdsAvailability,
+  adRangeKey, api, ApiRequestError,
+  type AdAccount, type AdCampaign, type AdDateRange, type AdInsights, type AdsAvailability,
 } from "@/lib/api";
 import { MetricCard } from "@/components/analytics/metric-card";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/ui/status-dot";
 import { AdAudit } from "@/components/meta/ad-audit";
+import { DateRangePicker } from "@/components/meta/date-range-picker";
 import { cn } from "@/lib/utils";
 
 /** Meta's ad API works in fixed presets, so the picker matches them exactly. */
-const PRESETS: { key: AdDatePreset; label: string }[] = [
+const PRESETS: { key: Extract<AdDateRange, { preset: string }>["preset"]; label: string }[] = [
   { key: "today", label: "Today" },
   { key: "yesterday", label: "Yesterday" },
   { key: "last_7d", label: "Last 7 days" },
@@ -25,7 +26,7 @@ const PRESETS: { key: AdDatePreset; label: string }[] = [
 export default function MetaAdsPage() {
   const [availability, setAvailability] = useState<AdsAvailability | null>(null);
   const [account, setAccount] = useState<AdAccount | null>(null);
-  const [preset, setPreset] = useState<AdDatePreset>("last_30d");
+  const [range, setRange] = useState<AdDateRange>({ preset: "last_30d" });
   const [insights, setInsights] = useState<AdInsights | null>(null);
   const [campaigns, setCampaigns] = useState<AdCampaign[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -48,7 +49,7 @@ export default function MetaAdsPage() {
    * effect body is what triggers the cascading-render warning.
    */
   const [loadedFor, setLoadedFor] = useState<string | null>(null);
-  const requestKey = account ? `${account.id}:${preset}:${reload}` : null;
+  const requestKey = account ? `${account.id}:${adRangeKey(range)}:${reload}` : null;
   const stale = requestKey !== null && loadedFor !== requestKey;
 
   useEffect(() => {
@@ -58,8 +59,8 @@ export default function MetaAdsPage() {
     void (async () => {
       try {
         const [i, c] = await Promise.all([
-          api.integrations.adInsights(account.id, preset),
-          api.integrations.adCampaigns(account.id, preset),
+          api.integrations.adInsights(account.id, range),
+          api.integrations.adCampaigns(account.id, range),
         ]);
         if (cancelled) return;
         setInsights(i.insights);
@@ -74,7 +75,7 @@ export default function MetaAdsPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [account, preset, requestKey]);
+  }, [account, range, requestKey]);
 
   const currency = account?.currency ?? "";
   const money = (v: number | null) =>
@@ -135,19 +136,36 @@ export default function MetaAdsPage() {
                 <span className="ml-2 text-[11px] opacity-70">{a.statusLabel}</span>
               </button>
             ))}
-            <div className="ml-auto flex items-center rounded-lg border border-border bg-card p-0.5">
-              {PRESETS.map((p) => (
-                <button
-                  key={p.key}
-                  onClick={() => setPreset(p.key)}
-                  className={cn(
-                    "rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors",
-                    preset === p.key ? "bg-accent text-white" : "text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  {p.label}
-                </button>
-              ))}
+            <div className="ml-auto flex items-center gap-2">
+              <div className="flex items-center rounded-lg border border-border bg-card p-0.5">
+                {PRESETS.map((p) => (
+                  <button
+                    key={p.key}
+                    onClick={() => setRange({ preset: p.key })}
+                    className={cn(
+                      "rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors",
+                      "preset" in range && range.preset === p.key ? "bg-accent text-white" : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+              <DateRangePicker
+                value={"since" in range ? range : null}
+                onApply={(since, until) => setRange({ since, until })}
+                trigger={
+                  <button
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors",
+                      "since" in range ? "border-accent/40 bg-accent-soft text-accent" : "border-border text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    <Calendar className="size-3.5" />
+                    {"since" in range ? `${range.since} – ${range.until}` : "Custom"}
+                  </button>
+                }
+              />
             </div>
           </div>
 
@@ -215,11 +233,11 @@ export default function MetaAdsPage() {
 
           {/* Campaigns → ad sets → ad copies, and the sales each one produced. */}
           <AdAudit
-            key={`${account?.id ?? ""}:${preset}`}
+            key={`${account?.id ?? ""}:${adRangeKey(range)}`}
             accountId={account?.id ?? ""}
             numericAccountId={account?.accountId ?? ""}
             currency={currency}
-            preset={preset}
+            range={range}
             loading={stale || campaigns === null}
             campaigns={campaigns ?? []}
           />

@@ -6,7 +6,7 @@ import {
   AlertTriangle, ChevronRight, ExternalLink, Image as ImageIcon, Layers, Loader2, Megaphone,
   PlayCircle, RefreshCw, Search, SquareStack,
 } from "lucide-react";
-import { api, ApiRequestError, type Ad, type AdCampaign, type AdCreative, type AdDatePreset, type AdMediaType, type AdSet } from "@/lib/api";
+import { adRangeKey, api, ApiRequestError, type Ad, type AdCampaign, type AdCreative, type AdDateRange, type AdMediaType, type AdSet } from "@/lib/api";
 import { MetricCard } from "@/components/analytics/metric-card";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -44,7 +44,15 @@ const money = (currency: string, v: number | null) =>
   v === null ? null : `${currency ? currency + " " : ""}${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 const pct = (v: number | null) => (v === null ? null : `${v.toFixed(2)}%`);
 const roasFmt = (v: number | null) => (v === null ? null : `${v.toFixed(2)}×`);
+const freqFmt = (v: number | null) => (v === null ? null : v.toFixed(2));
 const errMsg = (err: unknown, fallback: string) => (err instanceof ApiRequestError ? err.message : fallback);
+
+/** A campaign or ad set carries at most one of these — whichever Meta has set. */
+function budgetFmt(currency: string, dailyBudget: number | null, lifetimeBudget: number | null): string | null {
+  if (dailyBudget !== null) return `${money(currency, dailyBudget)} / day`;
+  if (lifetimeBudget !== null) return `${money(currency, lifetimeBudget)} total`;
+  return null;
+}
 
 type LoadState<T> = { status: "loading" } | { status: "error"; message: string } | { status: "ready"; data: T };
 
@@ -52,7 +60,7 @@ export function AdAudit({
   accountId,
   numericAccountId,
   currency,
-  preset,
+  range,
   loading,
   campaigns,
 }: {
@@ -60,7 +68,7 @@ export function AdAudit({
   accountId: string;
   numericAccountId: string;
   currency: string;
-  preset: AdDatePreset;
+  range: AdDateRange;
   /** True while `campaigns` itself is still loading. */
   loading: boolean;
   campaigns: AdCampaign[];
@@ -68,7 +76,7 @@ export function AdAudit({
   // Every cached child (expanded rows, loaded ad sets/ads) needs to reset
   // when the account or date range changes. Rather than an effect that
   // clears state — which triggers an extra render pass — the caller keys
-  // this component on `${accountId}:${preset}`, so a change simply
+  // this component on `${accountId}:${range}`, so a change simply
   // remounts it with fresh state.
   const [expandedCampaigns, setExpandedCampaigns] = useState<Set<string>>(new Set());
   const [expandedAdSets, setExpandedAdSets] = useState<Set<string>>(new Set());
@@ -79,7 +87,7 @@ export function AdAudit({
   function loadAdSets(campaignId: string) {
     setAdSetsByCampaign((prev) => ({ ...prev, [campaignId]: { status: "loading" } }));
     api.integrations
-      .adSetsForCampaign(campaignId, preset)
+      .adSetsForCampaign(campaignId, range)
       .then((r) => setAdSetsByCampaign((prev) => ({ ...prev, [campaignId]: { status: "ready", data: r.adSets } })))
       .catch((err) => setAdSetsByCampaign((prev) => ({ ...prev, [campaignId]: { status: "error", message: errMsg(err, "Couldn't load ad sets.") } })));
   }
@@ -102,7 +110,7 @@ export function AdAudit({
   function loadAds(adsetId: string) {
     setAdsByAdSet((prev) => ({ ...prev, [adsetId]: { status: "loading" } }));
     api.integrations
-      .adsForAdSet(adsetId, preset)
+      .adsForAdSet(adsetId, range)
       .then((r) => setAdsByAdSet((prev) => ({ ...prev, [adsetId]: { status: "ready", data: r.ads } })))
       .catch((err) => setAdsByAdSet((prev) => ({ ...prev, [adsetId]: { status: "error", message: errMsg(err, "Couldn't load ad copies.") } })));
   }
@@ -182,10 +190,10 @@ export function AdAudit({
           <EmptyState icon={Megaphone} title="No campaigns" description="This ad account has no campaigns yet." className="border-0 bg-transparent py-10" />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[880px] text-sm">
+            <table className="w-full min-w-[1360px] text-sm">
               <thead>
                 <tr className="border-b border-border text-left">
-                  {["Name", "Status", "Spend", "Clicks", "Purchases", "Purchase value", "ROAS"].map((h) => (
+                  {["Name", "Status", "Budget", "Spend", "Views", "Frequency", "CPM", "Clicks", "Cost/click", "Purchases", "Purchase value", "ROAS"].map((h) => (
                     <th key={h} className="px-5 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                       {h}
                     </th>
@@ -214,8 +222,13 @@ export function AdAudit({
                         <td className="px-5 py-3">
                           <StatusDot state={c.status === "ACTIVE" ? "connected" : "disconnected"} label={c.status.toLowerCase()} />
                         </td>
+                        <NumCell v={budgetFmt(currency, c.dailyBudget, c.lifetimeBudget)} />
                         <NumCell v={c.insights.spend} fmt={(v) => money(currency, v)} />
+                        <NumCell v={c.insights.impressions} />
+                        <NumCell v={c.insights.frequency} fmt={freqFmt} />
+                        <NumCell v={c.insights.cpm} fmt={(v) => money(currency, v)} />
                         <NumCell v={c.insights.clicks} />
+                        <NumCell v={c.insights.cpc} fmt={(v) => money(currency, v)} />
                         <NumCell v={c.insights.conversions} />
                         <NumCell v={c.insights.purchaseValue} fmt={(v) => money(currency, v)} />
                         <NumCell v={c.insights.roas} fmt={roasFmt} />
@@ -226,7 +239,7 @@ export function AdAudit({
                   if (row.kind === "adsets-loading") {
                     return (
                       <tr key={`asl-${i}`} className="border-b border-border/60">
-                        <td colSpan={7} className="py-3 pl-9 pr-5 text-xs text-muted-foreground">
+                        <td colSpan={12} className="py-3 pl-9 pr-5 text-xs text-muted-foreground">
                           <span className="inline-flex items-center gap-2">
                             <Loader2 className="size-3.5 animate-spin" /> Loading ad sets…
                           </span>
@@ -238,7 +251,7 @@ export function AdAudit({
                   if (row.kind === "adsets-error") {
                     return (
                       <tr key={`ase-${row.campaignId}`} className="border-b border-border/60">
-                        <td colSpan={7} className="py-3 pl-9 pr-5">
+                        <td colSpan={12} className="py-3 pl-9 pr-5">
                           <RetryRow message={row.message} onRetry={() => loadAdSets(row.campaignId)} />
                         </td>
                       </tr>
@@ -266,8 +279,13 @@ export function AdAudit({
                         <td className="py-2.5 pr-5">
                           <StatusDot state={s.status === "ACTIVE" ? "connected" : "disconnected"} label={s.status.toLowerCase()} />
                         </td>
+                        <NumCell v={budgetFmt(currency, s.dailyBudget, s.lifetimeBudget)} />
                         <NumCell v={s.insights.spend} fmt={(v) => money(currency, v)} />
+                        <NumCell v={s.insights.impressions} />
+                        <NumCell v={s.insights.frequency} fmt={freqFmt} />
+                        <NumCell v={s.insights.cpm} fmt={(v) => money(currency, v)} />
                         <NumCell v={s.insights.clicks} />
+                        <NumCell v={s.insights.cpc} fmt={(v) => money(currency, v)} />
                         <NumCell v={s.insights.conversions} />
                         <NumCell v={s.insights.purchaseValue} fmt={(v) => money(currency, v)} />
                         <NumCell v={s.insights.roas} fmt={roasFmt} />
@@ -278,7 +296,7 @@ export function AdAudit({
                   if (row.kind === "ads-loading") {
                     return (
                       <tr key={`adl-${i}`} className="border-b border-border/60">
-                        <td colSpan={7} className="py-3 pl-16 pr-5 text-xs text-muted-foreground">
+                        <td colSpan={12} className="py-3 pl-16 pr-5 text-xs text-muted-foreground">
                           <span className="inline-flex items-center gap-2">
                             <Loader2 className="size-3.5 animate-spin" /> Loading ad copies…
                           </span>
@@ -290,7 +308,7 @@ export function AdAudit({
                   if (row.kind === "ads-error") {
                     return (
                       <tr key={`ade-${row.adsetId}`} className="border-b border-border/60">
-                        <td colSpan={7} className="py-3 pl-16 pr-5">
+                        <td colSpan={12} className="py-3 pl-16 pr-5">
                           <RetryRow message={row.message} onRetry={() => loadAds(row.adsetId)} />
                         </td>
                       </tr>
@@ -320,8 +338,13 @@ export function AdAudit({
                       <td className="py-2 pr-5">
                         <StatusDot state={a.status === "ACTIVE" ? "connected" : "disconnected"} label={a.status.toLowerCase()} />
                       </td>
+                      <NumCell v={null} />
                       <NumCell v={a.insights.spend} fmt={(v) => money(currency, v)} />
+                      <NumCell v={a.insights.impressions} />
+                      <NumCell v={a.insights.frequency} fmt={freqFmt} />
+                      <NumCell v={a.insights.cpm} fmt={(v) => money(currency, v)} />
                       <NumCell v={a.insights.clicks} />
+                      <NumCell v={a.insights.cpc} fmt={(v) => money(currency, v)} />
                       <NumCell v={a.insights.conversions} />
                       <NumCell v={a.insights.purchaseValue} fmt={(v) => money(currency, v)} />
                       <NumCell v={a.insights.roas} fmt={roasFmt} />
@@ -334,7 +357,7 @@ export function AdAudit({
         )}
       </Card>
 
-      <ActiveAdsSearch accountId={accountId} preset={preset} currency={currency} onSelect={setDetailAd} />
+      <ActiveAdsSearch accountId={accountId} range={range} currency={currency} onSelect={setDetailAd} />
 
       <AdDetailDialog
         ad={detailAd}
@@ -367,12 +390,12 @@ function RetryRow({ message, onRetry }: { message: string; onRetry: () => void }
  */
 function ActiveAdsSearch({
   accountId,
-  preset,
+  range,
   currency,
   onSelect,
 }: {
   accountId: string;
-  preset: AdDatePreset;
+  range: AdDateRange;
   currency: string;
   onSelect: (ad: Ad) => void;
 }) {
@@ -384,7 +407,7 @@ function ActiveAdsSearch({
 
   /** Derived rather than cleared up front — clearing state synchronously in an effect body is what triggers React's cascading-render warning. */
   const [loadedFor, setLoadedFor] = useState<string | null>(null);
-  const requestKey = accountId ? `${accountId}:${preset}:${reloadKey}` : null;
+  const requestKey = accountId ? `${accountId}:${adRangeKey(range)}:${reloadKey}` : null;
   const stale = requestKey !== null && loadedFor !== requestKey;
 
   useEffect(() => {
@@ -392,7 +415,7 @@ function ActiveAdsSearch({
     let cancelled = false;
     void (async () => {
       try {
-        const r = await api.integrations.activeAds(accountId, preset);
+        const r = await api.integrations.activeAds(accountId, range);
         if (cancelled) return;
         setAds(r.ads);
         setError(null);
@@ -407,7 +430,7 @@ function ActiveAdsSearch({
     return () => {
       cancelled = true;
     };
-  }, [accountId, preset, requestKey]);
+  }, [accountId, range, requestKey]);
 
   const counts = useMemo(() => {
     const byType = { IMAGE: 0, VIDEO: 0, CAROUSEL: 0, UNKNOWN: 0 } as Record<AdMediaType, number>;
@@ -492,10 +515,10 @@ function ActiveAdsSearch({
           />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[880px] text-sm">
+            <table className="w-full min-w-[1280px] text-sm">
               <thead>
                 <tr className="border-b border-border text-left">
-                  {["Creative", "Ad copy", "Status", "Spend", "Clicks", "Purchases", "Purchase value", "ROAS"].map((h) => (
+                  {["Creative", "Ad copy", "Status", "Spend", "Views", "Frequency", "CPM", "Clicks", "Cost/click", "Purchases", "Purchase value", "ROAS"].map((h) => (
                     <th key={h} className="px-5 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                       {h}
                     </th>
@@ -518,7 +541,11 @@ function ActiveAdsSearch({
                       <StatusDot state={ad.status === "ACTIVE" ? "connected" : "disconnected"} label={ad.status.toLowerCase()} />
                     </td>
                     <NumCell v={ad.insights.spend} fmt={(v) => money(currency, v)} />
+                    <NumCell v={ad.insights.impressions} />
+                    <NumCell v={ad.insights.frequency} fmt={freqFmt} />
+                    <NumCell v={ad.insights.cpm} fmt={(v) => money(currency, v)} />
                     <NumCell v={ad.insights.clicks} />
+                    <NumCell v={ad.insights.cpc} fmt={(v) => money(currency, v)} />
                     <NumCell v={ad.insights.conversions} />
                     <NumCell v={ad.insights.purchaseValue} fmt={(v) => money(currency, v)} />
                     <NumCell v={ad.insights.roas} fmt={roasFmt} />
@@ -644,8 +671,8 @@ function CreativeThumb({ creative, size = "md" }: { creative: AdCreative | null;
   );
 }
 
-function NumCell({ v, fmt }: { v: number | null; fmt?: (n: number | null) => string | null }) {
-  const text = fmt ? fmt(v) : v === null ? null : v.toLocaleString();
+function NumCell({ v, fmt }: { v: number | string | null; fmt?: (n: number | null) => string | null }) {
+  const text = typeof v === "string" ? v : fmt ? fmt(v) : v === null ? null : v.toLocaleString();
   return <td className={cn("px-5 py-3 tabular-nums", text === null && "text-muted-foreground/40")}>{text ?? "—"}</td>;
 }
 
@@ -669,6 +696,8 @@ function AdDetailDialog({
     { label: "Spend", value: fmtMoney(ad?.insights.spend) },
     { label: "Impressions", value: ad?.insights.impressions?.toLocaleString() ?? "—" },
     { label: "Reach", value: ad?.insights.reach?.toLocaleString() ?? "—" },
+    { label: "Frequency", value: freqFmt(ad?.insights.frequency ?? null) ?? "—" },
+    { label: "CPM", value: fmtMoney(ad?.insights.cpm) },
     { label: "Clicks", value: ad?.insights.clicks?.toLocaleString() ?? "—" },
     { label: "CTR", value: pct(ad?.insights.ctr ?? null) ?? "—" },
     { label: "Cost / click", value: fmtMoney(ad?.insights.cpc) },

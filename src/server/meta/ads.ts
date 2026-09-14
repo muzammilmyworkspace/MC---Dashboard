@@ -17,6 +17,18 @@ import { providerRequest } from "../http";
 const GRAPH = "https://graph.facebook.com";
 
 export type DatePreset = "today" | "yesterday" | "last_7d" | "last_30d";
+/** Either one of Meta's fixed presets, or an explicit "YYYY-MM-DD" range — mirrors the picker in Meta's own Ads Manager. */
+export type DateRange = { preset: DatePreset } | { since: string; until: string };
+
+/** Query params for a top-level `/insights` call. */
+function rangeParams(range: DateRange): Record<string, string> {
+  return "preset" in range ? { date_preset: range.preset } : { time_range: JSON.stringify({ since: range.since, until: range.until }) };
+}
+
+/** The same range, as it's expressed inside a nested field expansion like `insights.date_preset(last_30d){...}`. */
+function rangeFieldExpr(range: DateRange): string {
+  return "preset" in range ? `date_preset(${range.preset})` : `time_range({'since':'${range.since}','until':'${range.until}'})`;
+}
 
 export class AdsUnavailableError extends Error {
   readonly code: string;
@@ -154,10 +166,10 @@ function shapeInsights(raw: RawInsight | undefined): AdInsights {
 const INSIGHT_FIELDS =
   "spend,impressions,reach,clicks,ctr,cpc,cpm,frequency,actions,action_values,purchase_roas";
 
-export async function accountInsights(accountId: string, preset: DatePreset): Promise<AdInsights> {
+export async function accountInsights(accountId: string, range: DateRange): Promise<AdInsights> {
   const res = await ads<{ data?: RawInsight[] }>(`${accountId}/insights`, {
     fields: INSIGHT_FIELDS,
-    date_preset: preset,
+    ...rangeParams(range),
   });
   return shapeInsights(res.data?.[0]);
 }
@@ -169,6 +181,9 @@ export interface Campaign {
   name: string;
   status: string;
   objective: string | null;
+  /** Only set when this campaign uses Campaign Budget Optimization — otherwise the budget lives on its ad sets instead. */
+  dailyBudget: number | null;
+  lifetimeBudget: number | null;
   insights: AdInsights;
 }
 
@@ -178,11 +193,15 @@ export interface Campaign {
  * Meta can nest insights inside the campaign edge, which avoids one call per
  * campaign — worth doing, since the platform enforces a per-app call budget.
  */
-export async function listCampaigns(accountId: string, preset: DatePreset, limit = 25): Promise<Campaign[]> {
+export async function listCampaigns(accountId: string, range: DateRange, limit = 25): Promise<Campaign[]> {
   const res = await ads<{
-    data?: { id: string; name?: string; status?: string; objective?: string; insights?: { data?: RawInsight[] } }[];
+    data?: {
+      id: string; name?: string; status?: string; objective?: string;
+      daily_budget?: string; lifetime_budget?: string;
+      insights?: { data?: RawInsight[] };
+    }[];
   }>(`${accountId}/campaigns`, {
-    fields: `id,name,status,objective,insights.date_preset(${preset}){${INSIGHT_FIELDS}}`,
+    fields: `id,name,status,objective,daily_budget,lifetime_budget,insights.${rangeFieldExpr(range)}{${INSIGHT_FIELDS}}`,
     limit,
   });
 
@@ -191,6 +210,8 @@ export async function listCampaigns(accountId: string, preset: DatePreset, limit
     name: c.name ?? "(unnamed campaign)",
     status: c.status ?? "UNKNOWN",
     objective: c.objective ?? null,
+    dailyBudget: minorToMajor(c.daily_budget),
+    lifetimeBudget: minorToMajor(c.lifetime_budget),
     insights: shapeInsights(c.insights?.data?.[0]),
   }));
 }
@@ -212,7 +233,7 @@ export async function listCampaigns(accountId: string, preset: DatePreset, limit
  */
 async function insightsByLevel(
   nodeId: string,
-  preset: DatePreset,
+  range: DateRange,
   level: "campaign" | "adset" | "ad",
   limit = 500
 ): Promise<Map<string, AdInsights>> {
@@ -220,7 +241,7 @@ async function insightsByLevel(
   const res = await ads<{ data?: (RawInsight & Record<string, string>)[] }>(`${nodeId}/insights`, {
     level,
     fields: `${idField},${INSIGHT_FIELDS}`,
-    date_preset: preset,
+    ...rangeParams(range),
     limit,
   });
 
@@ -261,12 +282,12 @@ function minorToMajor(v: unknown): number | null {
  * history is — this is called when that one campaign is expanded, not
  * before.
  */
-export async function listAdSetsForCampaign(campaignId: string, preset: DatePreset, limit = 200): Promise<AdSet[]> {
+export async function listAdSetsForCampaign(campaignId: string, range: DateRange, limit = 200): Promise<AdSet[]> {
   const [res, insightsMap] = await Promise.all([
     ads<{
       data?: { id: string; name?: string; campaign_id?: string; status?: string; daily_budget?: string; lifetime_budget?: string }[];
     }>(`${campaignId}/adsets`, { fields: "id,name,campaign_id,status,daily_budget,lifetime_budget", limit }),
-    insightsByLevel(campaignId, preset, "adset"),
+    insightsByLevel(campaignId, range, "adset"),
   ]);
 
   return (res.data ?? []).map((s) => ({
@@ -380,10 +401,10 @@ const AD_FIELDS = `id,name,adset_id,campaign_id,status,creative{${CREATIVE_FIELD
  * Ads under one ad set — not the whole account, same reasoning as
  * `listAdSetsForCampaign`. Called when that one ad set is expanded.
  */
-export async function listAdsForAdSet(adsetId: string, preset: DatePreset, limit = 200): Promise<Ad[]> {
+export async function listAdsForAdSet(adsetId: string, range: DateRange, limit = 200): Promise<Ad[]> {
   const [res, insightsMap] = await Promise.all([
     ads<{ data?: RawAd[] }>(`${adsetId}/ads`, { fields: AD_FIELDS, limit }),
-    insightsByLevel(adsetId, preset, "ad"),
+    insightsByLevel(adsetId, range, "ad"),
   ]);
   // The ad-set edge doesn't always echo adset_id back on each row; the id we scoped the call to is authoritative.
   return (res.data ?? []).map((a) => toAd({ ...a, adset_id: a.adset_id ?? adsetId }, insightsMap));
@@ -399,8 +420,8 @@ export async function listAdsForAdSet(adsetId: string, preset: DatePreset, limit
  * multi-id call. Reading metadata for every ad the account has ever
  * created — years of paused campaigns included — is what timed out.
  */
-export async function listActiveAdsForAccount(accountId: string, preset: DatePreset, limit = 200): Promise<Ad[]> {
-  const insightsMap = await insightsByLevel(accountId, preset, "ad", limit);
+export async function listActiveAdsForAccount(accountId: string, range: DateRange, limit = 200): Promise<Ad[]> {
+  const insightsMap = await insightsByLevel(accountId, range, "ad", limit);
   const ids = [...insightsMap.keys()];
   if (ids.length === 0) return [];
 

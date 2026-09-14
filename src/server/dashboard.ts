@@ -239,8 +239,8 @@ async function adsBlock(): Promise<AdsBlock> {
 
     const account = availability.accounts[0];
     const [insights, campaigns] = await Promise.all([
-      accountInsights(account.id, "last_30d").catch(() => null),
-      listCampaigns(account.id, "last_30d", 25).catch(() => []),
+      accountInsights(account.id, { preset: "last_30d" }).catch(() => null),
+      listCampaigns(account.id, { preset: "last_30d" }, 25).catch(() => []),
     ]);
 
     const withSpend = campaigns

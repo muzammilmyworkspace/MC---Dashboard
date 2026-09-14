@@ -555,7 +555,8 @@ export interface AdInsights {
 }
 
 export interface AdCampaign {
-  id: string; name: string; status: string; objective: string | null; insights: AdInsights;
+  id: string; name: string; status: string; objective: string | null;
+  dailyBudget: number | null; lifetimeBudget: number | null; insights: AdInsights;
 }
 
 export interface AdSet {
@@ -587,6 +588,19 @@ export interface AdsAvailability {
 }
 
 export type AdDatePreset = "today" | "yesterday" | "last_7d" | "last_30d";
+/** Either a fixed preset, or an explicit "YYYY-MM-DD" range — mirrors Meta's own date picker. */
+export type AdDateRange = { preset: AdDatePreset } | { since: string; until: string };
+
+function rangeQueryString(range: AdDateRange): string {
+  return "preset" in range
+    ? `preset=${range.preset}`
+    : `since=${encodeURIComponent(range.since)}&until=${encodeURIComponent(range.until)}`;
+}
+
+/** Stable, order-independent key for a range — for "is this stale?" checks and remount keys. */
+export function adRangeKey(range: AdDateRange): string {
+  return "preset" in range ? `preset:${range.preset}` : `custom:${range.since}:${range.until}`;
+}
 
 /* ------------------------------- Facebook -------------------------------- */
 
@@ -763,23 +777,23 @@ export const api = {
 
     /* --- Meta Ads (Marketing API) --------------------------------------- */
     adAccounts: () => get<AdsAvailability>("/api/meta-ads/accounts"),
-    adInsights: (accountId: string, preset: AdDatePreset = "last_30d") =>
-      get<{ accountId: string; preset: string; insights: AdInsights }>(
-        `/api/meta-ads/insights?accountId=${encodeURIComponent(accountId)}&preset=${preset}`
+    adInsights: (accountId: string, range: AdDateRange = { preset: "last_30d" }) =>
+      get<{ accountId: string; insights: AdInsights }>(
+        `/api/meta-ads/insights?accountId=${encodeURIComponent(accountId)}&${rangeQueryString(range)}`
       ),
-    adCampaigns: (accountId: string, preset: AdDatePreset = "last_30d") =>
+    adCampaigns: (accountId: string, range: AdDateRange = { preset: "last_30d" }) =>
       get<{ campaigns: AdCampaign[] }>(
-        `/api/meta-ads/campaigns?accountId=${encodeURIComponent(accountId)}&preset=${preset}`
+        `/api/meta-ads/campaigns?accountId=${encodeURIComponent(accountId)}&${rangeQueryString(range)}`
       ),
     /** Ad sets under one campaign — fetched when that campaign is expanded, not for the whole account at once. */
-    adSetsForCampaign: (campaignId: string, preset: AdDatePreset = "last_30d") =>
-      get<{ adSets: AdSet[] }>(`/api/meta-ads/adsets?campaignId=${encodeURIComponent(campaignId)}&preset=${preset}`),
+    adSetsForCampaign: (campaignId: string, range: AdDateRange = { preset: "last_30d" }) =>
+      get<{ adSets: AdSet[] }>(`/api/meta-ads/adsets?campaignId=${encodeURIComponent(campaignId)}&${rangeQueryString(range)}`),
     /** Ads under one ad set — fetched when that ad set is expanded. */
-    adsForAdSet: (adsetId: string, preset: AdDatePreset = "last_30d") =>
-      get<{ ads: Ad[] }>(`/api/meta-ads/ads?adsetId=${encodeURIComponent(adsetId)}&preset=${preset}`),
+    adsForAdSet: (adsetId: string, range: AdDateRange = { preset: "last_30d" }) =>
+      get<{ ads: Ad[] }>(`/api/meta-ads/ads?adsetId=${encodeURIComponent(adsetId)}&${rangeQueryString(range)}`),
     /** Every ad with activity in the period, account-wide — for the searchable "every ad copy" list. */
-    activeAds: (accountId: string, preset: AdDatePreset = "last_30d") =>
-      get<{ ads: Ad[] }>(`/api/meta-ads/ads?accountId=${encodeURIComponent(accountId)}&preset=${preset}`),
+    activeAds: (accountId: string, range: AdDateRange = { preset: "last_30d" }) =>
+      get<{ ads: Ad[] }>(`/api/meta-ads/ads?accountId=${encodeURIComponent(accountId)}&${rangeQueryString(range)}`),
     /** Lazy, on-demand — called only when a video ad's thumbnail is hovered. */
     adVideoSource: (videoId: string) =>
       get<{ source: string | null; thumbnailUrl: string | null }>(`/api/meta-ads/video/${encodeURIComponent(videoId)}`),
